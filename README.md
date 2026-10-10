@@ -1,12 +1,14 @@
-# FORM · ETH Copy Desk (MVP, PAPER ONLY)
+# FORM · ETH Copy Desk (MVP — PAPER by default, gated LIVE path)
 
-> ## ⚠️ NO LIVE TRADING
-> This build **cannot trade**. There is no private-key handling, no signer, no transaction
-> builder and no order routing anywhere in the code, and no web3/signing library in
-> `requirements.txt` (chain access is read-only JSON-RPC over `httpx`; `app/rpc.py` refuses any
-> method outside a read allow-list, e.g. `eth_sendRawTransaction` / `eth_sign`). `LIVE_ENABLED=false` is enforced: if it is set truthy the app **refuses
-> to start** (`LiveTradingForbidden`), and the paper engine re-checks it on every tick.
-> All fills, prices, P&L and the demo wallets/tokens are **simulated / fake**. Nothing here is advice.
+> ## ⚠️ LIVE IS OFF BY DEFAULT — and the server never holds a key
+> Paper is the default and needs nothing. A **live path** exists but is stacked behind independent gates
+> that all default off (`LIVE_ENABLED`, `LIVE_ARMED`, a runtime arm with `ARM_CODE` + typed phrase that
+> expires, `LIVE_BROADCAST`, then a per-trade confirm click **and** your wallet's own signature prompt).
+> The server only ever returns **unsigned** Uniswap calldata; **your browser wallet** (MetaMask / any
+> injected EIP-1193 wallet) signs and broadcasts. There is no private-key handling, no signer and no
+> web3/signing library in `requirements.txt`; `app/rpc.py` still refuses `eth_sendRawTransaction` /
+> `eth_sign` & co. **$500 max per trade** is a hard ceiling no config can raise. See **Security** below.
+> Paper fills, P&L and the demo wallets/tokens are **simulated / fake**. Nothing here is advice.
 
 ## What it is
 A Trencher-style **copy-trade desk for Ethereum mainnet**, paper-only. It watches a list of
@@ -20,7 +22,7 @@ Demo mode (default) runs fully offline on a fixture tape, so the dashboard works
 With an `ETH_RPC_URL` set, the desk can read **real Uniswap pools on Ethereum mainnet** (read-only)
 for the liquidity floor, fill price and price impact, and `GET /api/quote/{token}` quotes any token.
 With `SIGNAL_SOURCE=live` it also turns **real Uniswap V2/V3 buys/sells by your watched wallets** into
-paper-engine signals (decoded from mainnet tx receipts; see §5). Still paper only — nothing is signed.
+paper-engine signals (decoded from mainnet tx receipts; see §5). The paper path never signs; the optional live path is described in **Security & live trading**.
 
 ## Run
 ```bash
@@ -44,7 +46,8 @@ otherwise they are skipped (`LIVE_TEST_WALLET=0x…` picks the wallet for the li
 ![dashboard](docs/dashboard.png)
 
 `http://127.0.0.1:8787/` serves a vanilla HTML/CSS/JS console (`app/static/`, no build step, no JS deps;
-Inter/JetBrains Mono load from Google Fonts with system fallbacks). A red **LIVE OFF · PAPER ONLY** strip is pinned to the top at all times.
+Inter/JetBrains Mono load from Google Fonts with system fallbacks). A status strip is pinned to the top at all times: red **LIVE OFF** (default), amber **LIVE DISARMED**, blue **LIVE ARMED · DRY RUN**, pulsing red **LIVE ARMED · BROADCAST ON**.
+- **Live execution** panel: gate ladder (LIVE_ENABLED / LIVE_ARMED / armed + countdown / LIVE_BROADCAST / kill switch / daily loss bar / caps), wallet connect (MetaMask via `window.ethereum`, or WalletConnect stub instructions), **Prepare live trade** per paper-approved candidate → order dialog (checks with layers, simulation, unsigned calldata, blockers) → **Confirm & sign in wallet** (only when armed + broadcast). Arm / Disarm / Kill buttons.
 - **Header**: LIVE OFF chip, chain, latest block (RPC probe), data/signal mode, sim clock or live-feed cursor, session id.
   Actions: **Run tick** `T`, **Run cycle** `R` (whole tape / one live poll+process), **Poll live** `P` (enabled only with
   `SIGNAL_SOURCE=live`), **Reset paper** `Shift+X` (confirm; the_record kept), auto-refresh toggle `A` (5 s), help `?`.
@@ -60,7 +63,7 @@ Inter/JetBrains Mono load from Google Fonts with system fallbacks). A red **LIVE
 Refresh: the page polls every 5 s (toggle `A`, force `G`); after editing `app/static/*` just reload the browser
 (assets are served straight from disk; bump `?v=` in `index.html` if a browser caches hard).
 
-## Real mainnet reads (RPC + Uniswap), still paper only
+## Real mainnet reads (RPC + Uniswap)
 ### 1. Get a free RPC URL (never commit it)
 - **Alchemy**: sign up at alchemy.com → *Create app* → chain *Ethereum*, network *Mainnet* → copy the
   HTTPS URL `https://eth-mainnet.g.alchemy.com/v2/<KEY>`.
@@ -235,7 +238,7 @@ not real traders. `beef` has missing stats to show fail-closed behaviour.
 ## FORM mapping
 | FORM principle | Where |
 |---|---|
-| Live dark | `app/config.py` `assert_live_dark` (startup + every tick); no signer exists; UI banner "LIVE OFF" |
+| Live gated | `app/config.py` `assert_live_dark` refuses blind enable (startup + every tick + every live call); `app/live.py` gate stack; server never signs; UI banner shows OFF / DISARMED / ARMED·DRY RUN / ARMED·BROADCAST |
 | Strict wallet gates, fail closed | `app/gates.py` — round-trips, win rate, median hold, spray (buys/day), leftover/unsold cap, top-coin profit concentration, independence note. Missing input ⇒ FAIL + `unknown` claim. Only PASS wallets can be `watched`; others are `parked` (PATCH to watched on a FAIL returns 409). |
 | Liquidity floor | `app/paper.py::_buy` — `LIQUIDITY_FLOOR_USD`; unknown liquidity fails closed. In `rpc`/`hybrid` the number is the live V2 pool (`app/market.py::LiveMarket`), logged as a `pool_read` (`fact`) record; a missing pair / RPC error / bad data ⇒ `skip` with layer `unknown` and a `cause` |
 | Lag + impact haircut | `app/paper.py::_fill` — fixture: mid `LAG_MS` after the signal ± (`IMPACT_PCT` + size/liquidity %); live: latest-block V2 mid ± (exact V2 curve cost + `IMPACT_PCT`). Plus `PAPER_GAS_USD` per side; marks use mid − impact. A live exit whose price can't be read is deferred (`unknown`), never invented |
@@ -248,6 +251,86 @@ Layer convention: **fact** = an observed input as the source reported it (in dem
 **inference** = a verdict/simulation derived from facts + rules; **hypothesis** = forward-looking
 (e.g. "edge persists", "cluster forming"); **unknown** = required data missing.
 
+## Security & live trading
+### Custody model
+- **No server-side keys, ever.** The desk builds an *unsigned* tx (`{from, to, value, data, chainId}`) and the
+  browser asks **your** wallet (`window.ethereum`: `eth_requestAccounts`, then `eth_sendTransaction`) to sign and
+  broadcast it. The UI never asks for, stores or transmits a private key / seed phrase. If `PRIVATE_KEY`,
+  `ETH_PRIVATE_KEY`, `WALLET_PRIVATE_KEY`, `MNEMONIC`, `SEED_PHRASE` or `SIGNER_KEY` is in the environment the
+  app **refuses to start**.
+- The RPC client is read-only (allow-list); the live path adds only `eth_estimateGas` / `eth_gasPrice` /
+  `eth_call`-with-`from`/`value` for **simulation** and receipt/tx lookups for verification.
+
+### The gate stack (all must pass, top to bottom)
+| # | Gate | Default | Where |
+|---|---|---|---|
+| 1 | `LIVE_ENABLED=true` — refuses to start without `ARM_CODE` (≥12 chars) or `ARM_CODE_SHA256`, without `ETH_RPC_URL`, with any cap > $500, slippage > 500 bp, impact > 5 %, or a live floor looser than paper's. `LIVE_ARMED`/`LIVE_BROADCAST` set while this is false also refuse (ambiguous config). | off | `config.py::assert_live_dark` (startup, every tick, every live call) |
+| 2 | `LIVE_ARMED=true` — config-side consent to allow runtime arming | off | `.env` |
+| 3 | **Runtime arm** = dual confirmation: `ARM_CODE` (sha256 + constant-time compare) **and** typed phrase `ARM LIVE 500`. Expires after `LIVE_ARM_TTL_S` (900 s). 5 wrong codes lock arming until restart. Kill switch disarms. | disarmed | `POST /api/live/arm` |
+| 4 | `LIVE_BROADCAST=true` — otherwise **dry run**: prepare + simulate only, confirm is refused, the UI never calls `eth_sendTransaction` | off | `.env` |
+| 5 | Per-trade **confirm click** in the UI (`confirm: true`) → server re-checks *everything* → then your wallet's own signature prompt | — | `POST /api/live/orders/{id}/confirm` |
+
+### Per-trade risk checks (`app/live.py::prepare`, re-checked on confirm)
+- **$500 max per trade**: `LIVE_TRADE_USD` (default $100) ≤ `LIVE_MAX_TRADE_USD` ≤ hard `$500`. Buys: ETH value
+  computed from the live V2 ETH/USD; exits larger than $500 are **partial** (the rest stays open). The browser
+  re-checks the cap, target (router/token) and chain (`0x1`) before opening the wallet.
+- **Daily loss kill switch**: realized live P&L + gas for the UTC day ≤ −`LIVE_DAILY_LOSS_LIMIT_USD` → new
+  entries refused, desk disarms. Also `LIVE_MAX_TRADES_PER_DAY`. **Manual kill** (`POST /api/live/kill`) and a
+  **broadcast mismatch** latch it until reset with the arm code.
+- **Price impact cap** (`LIVE_MAX_IMPACT_PCT`, V2 curve incl. 0.3 % fee) and **slippage cap**
+  (`amountOutMin = router getAmountsOut − LIVE_MAX_SLIPPAGE_BPS`), deadline `LIVE_DEADLINE_S`, quote TTL
+  `LIVE_QUOTE_TTL_S` (re-prepare after).
+- **Liquidity floor** `max(LIVE_LIQUIDITY_FLOOR_USD, LIQUIDITY_FLOOR_USD)` from a live V2 pool read; unknown ⇒ refuse (`unknown`).
+- **Only watched + gate-PASS wallets, re-scored at prepare time**, and the **cluster rule**: ≥ `CLUSTER_MIN_WALLETS`
+  of the paper position's source wallets must *still* be watched+PASS when `CLUSTER_REQUIRED=true`
+  (override with `LIVE_MIN_CLUSTER_WALLETS`).
+- **Only paper-approved signals**: candidates are open paper positions (entries the paper engine already passed)
+  and open live positions (exits). Fixture-tape approvals (sim clock) are allowed for dry runs only; with
+  `LIVE_BROADCAST=true` the paper entry must come from a live signal younger than `SIGNAL_MAX_AGE_S`.
+- **Simulation**: `eth_call` + `eth_estimateGas` of the exact tx from your address; a revert/failure ⇒ signing refused.
+- Optional `LIVE_ALLOWED_SENDERS` allow-list of your wallet addresses.
+- **Exits** (`swapExactTokensForETH`) skip wallet/cluster/kill-switch/floor gates (reducing risk is always
+  allowed) but keep the $500, impact and slippage caps and still need arming + broadcast. Approval is
+  **exact-amount** (`approve(router, amount)`), never infinite, prepared as its own order first.
+
+### the_record for live (all with FORM layers)
+`live_prepare` (inference: quote + checks + unsigned tx) · `live_simulate` (fact if eth_call ran / unknown if it
+failed) · `live_refused` (inference / unknown) · `live_armed` / `live_disarmed` / `live_arm_failed` (fact) ·
+`live_sign_request` (fact: tx released to the wallet after your click) · `live_sign_rejected` (fact) ·
+`live_broadcast` (**fact** once the on-chain tx's from/to/value/input match what was prepared; **unknown** while only
+client-reported; a mismatch is recorded and latches the kill switch) · `live_confirm` (fact: receipt) ·
+`live_fill` (inference: tokens/ETH received, USD) · `live_kill_switch` · `live_expired`.
+Live orders/positions live in `live_orders` / `live_positions` and are **never** cleared by *Reset paper*.
+
+![live dry run](docs/live-dry-run.png)
+
+*Dry run against the offline fake chain: prepared V2 swap, checks with layers, simulation, unsigned calldata; broadcast disabled.*
+
+### How to arm safely (step by step)
+1. Stay in paper until the paper record convinces you. Use a **fresh, low-balance hot wallet** that holds only
+   what you can lose (≤ a few × $500); never your main wallet.
+2. `.env` (gitignored): `ETH_RPC_URL=…`, `DATA_MODE=rpc` (or `hybrid`), `SIGNAL_SOURCE=live`, separate `DB_PATH`,
+   `ARM_CODE_SHA256=<sha256 of a long passphrase>`, `LIVE_ALLOWED_SENDERS=<your hot wallet>`,
+   `LIVE_ENABLED=true`, `LIVE_ARMED=true`, **`LIVE_BROADCAST=false`**. Restart.
+3. Dry run: connect the wallet, **Prepare live trade** on a candidate, read the checks, simulation and
+   calldata. Nothing can be sent.
+4. Only then set `LIVE_BROADCAST=true`, restart, click **Arm…**, enter the code + `ARM LIVE 500`.
+   Each trade: Prepare → Confirm & sign → read the wallet prompt (amount, `to` = Uniswap V2 Router02
+   `0x7a250d56…488D`, network = Ethereum) → sign. Disarm (or let it expire) when you step away.
+5. Kill: **Kill** button (latches + disarms) or `POST /api/live/kill`. Turning everything off = `LIVE_ENABLED=false` + restart.
+
+### API hardening
+State-changing `/api/live/*` routes require header `X-Form-Desk: 1` (forces a CORS preflight the app never
+approves) and reject a foreign `Origin` — a random web page can't drive the desk from your browser. There is still
+**no user auth**: bind to `127.0.0.1` only; anyone with local access who knows `ARM_CODE` can arm (but still can't
+sign — that needs your wallet).
+
+### WalletConnect
+Only injected wallets are wired (MetaMask, Rabby, Coinbase Wallet extension, MetaMask Mobile in-app browser).
+WalletConnect v2 needs a Reown/WalletConnect `projectId` and its provider bundle (no build step here); the UI shows a
+stub with instructions. Wiring it = load `@walletconnect/ethereum-provider`, `init({projectId, chains:[1],
+showQrModal:true})`, then use that provider in place of `window.ethereum` (same EIP-1193 calls).
+
 ## Layout
 ```
 app/config.py    settings + live guard        app/gates.py    wallet scoring
@@ -259,11 +342,14 @@ app/uniswap.py   V2 pair/reserves/price/liquidity/impact, ETH/USD, V3 slot0/TVL/
 app/market.py    FixtureMarket / LiveMarket (what the paper engine asks for prices/liquidity/impact)
 app/swaps.py     "last N swaps" for a wallet via eth_getLogs (read-only smoke route)
 app/live_signals.py  live watched-wallet swap scanner/decoder + LiveSource (SIGNAL_SOURCE=live)
+app/live.py      LIVE path: gates, caps, kill switch, arming, unsigned V2 calldata, simulation, broadcast verification
 app/main.py      FastAPI routes               app/static/     dashboard (HTML/JS/CSS)
 data/            seed_wallets.json, fixture_signals.json, fixture_signals_live.json (real tokens),
                  form.db, the_record.jsonl
 tests/           test_smoke.py (demo cycle), test_uniswap.py (offline fake chain + gated live), fakechain.py,
-                 test_live_signals.py (decoder/scanner/engine on fake receipts + gated live scan), fakelive.py
+                 test_live_signals.py (decoder/scanner/engine on fake receipts + gated live scan), fakelive.py,
+                 test_live.py (live caps/gates/arming/kill switch/verification — offline, nothing broadcast),
+                 keccak.py (pure-Python keccak to verify hard-coded selectors)
 ```
 
 ## API
@@ -276,6 +362,12 @@ tests/           test_smoke.py (demo cycle), test_uniswap.py (offline fake chain
 `GET /api/swaps/{wallet}?blocks=&limit=` (last N Uniswap V2/V3 swaps where wallet is the recipient) ·
 `GET /api/signals/live?status=&limit=` (decoded live txs) · `POST /api/signals/poll` (scan only, live mode) ·
 `GET /api/signals/scan/{wallet}?blocks=` (ad-hoc read-only decode of any wallet).
+Live (POSTs need header `X-Form-Desk: 1`): `GET /api/live/status` · `GET /api/live/candidates` ·
+`GET /api/live/orders` · `GET /api/live/orders/{id}` · `GET /api/live/positions` · `POST /api/live/arm {code, phrase}` ·
+`POST /api/live/disarm` · `POST /api/live/kill {reason}` · `POST /api/live/kill/reset {code}` ·
+`POST /api/live/prepare {ref, sender}` (ref = `buy:<paper_position_id>` | `sell:<live_position_id>`) ·
+`POST /api/live/orders/{id}/confirm {sender, confirm}` · `POST /api/live/orders/{id}/submitted {tx_hash}` ·
+`POST /api/live/orders/{id}/rejected {reason}` · `POST /api/live/orders/{id}/poll`.
 Background loop: `AUTO_TICK_SECONDS>0` (tape) or `SIGNAL_POLL_SECONDS>0` (live; runs in a worker thread).
 
 ## Known gaps / next steps
@@ -304,5 +396,12 @@ Background loop: `AUTO_TICK_SECONDS>0` (tape) or `SIGNAL_POLL_SECONDS>0` (live; 
 6. Token safety checks not implemented (honeypot/fee-on-transfer/tax/ownership, e.g. GoPlus) — a
    fee-on-transfer token's V2 impact is understated. No stop-loss/time exits, no per-token caps beyond
    cash, no auth on the API (bind to 127.0.0.1 only).
-7. Going live is **out of scope** and would need a separate, reviewed design (hardware/remote
-   signer, simulation via `eth_call`, MEV-protected submission, kill switch). Do not bolt it on here.
+7. **Live path gaps** (read before arming): V2 Router02 only (no Universal Router / V3 / V4 routing, so V3-only
+   liquidity fails closed); **public mempool** submission — no MEV protection unless your wallet uses a private RPC
+   (e.g. set MetaMask's network RPC to Flashbots Protect); ETH/USD from two V2 pools, not Chainlink; kill switch counts
+   **realized** P&L + gas only (open-position drawdown is not counted) and uses the UTC day; arm state is in-memory
+   (restart = disarmed, by design) and the arm-failure lockout is per process; no token-safety screen
+   (honeypot / fee-on-transfer / tax) beyond the simulation; partial exits when a position is worth > $500 need
+   several trades; if you close the tab between signing and reporting the hash, the order expires and the fill must
+   be reconciled by hand (it shows in your wallet); WalletConnect is a stub; no API auth (localhost only); the
+   live path has only been exercised against the offline fake chain — never against mainnet with real funds.

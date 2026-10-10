@@ -49,6 +49,30 @@ CREATE TABLE IF NOT EXISTS live_txs (
     seen_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS live_txs_sig ON live_txs(status, t);
+-- LIVE execution (app/live.py). Real-money history: NEVER cleared by a paper reset.
+CREATE TABLE IF NOT EXISTS live_orders (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER, day TEXT,
+    kind TEXT,                                   -- swap | approve
+    side TEXT, token TEXT, symbol TEXT,
+    ref TEXT,                                    -- buy:<paper_position_id> | sell:<live_position_id>
+    sender TEXT,
+    status TEXT NOT NULL,                        -- prepared | refused | sign_requested | rejected | submitted |
+                                                 -- confirmed | failed | expired | mismatch
+    usd_notional REAL, tx_json TEXT, quote_json TEXT, checks_json TEXT, sim_json TEXT,
+    tx_hash TEXT, verified INTEGER DEFAULT 0, receipt_json TEXT,
+    gas_usd REAL DEFAULT 0, pnl_usd REAL DEFAULT 0, updated_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS live_orders_day ON live_orders(day, status);
+CREATE TABLE IF NOT EXISTS live_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT, symbol TEXT, decimals INTEGER, owner TEXT,
+    status TEXT,                                 -- open | closed
+    paper_position_id INTEGER,
+    qty_raw TEXT, cost_usd REAL, realized_usd REAL DEFAULT 0,
+    opened_at INTEGER, closed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS live_state (key TEXT PRIMARY KEY, value TEXT);
 """
 
 

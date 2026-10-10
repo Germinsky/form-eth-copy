@@ -1,4 +1,4 @@
-"""Uniswap reads on Ethereum mainnet (read-only eth_call). PAPER ONLY — no swaps are built or sent.
+"""Uniswap reads on Ethereum mainnet (read-only eth_call). Never signs or sends; swap calldata for the gated live path is built in app/live.py.
 
 V2 (primary, used by the paper liquidity gate):
   factory.getPair(token, WETH) -> pair.getReserves() -> spot price in ETH, USD via ETH/USD,

@@ -351,3 +351,43 @@ table.keys td { padding: 5px 8px; font-size: 12.5px; } table.keys td:first-child
 
 td.wcell { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
 td.outc { white-space: normal !important; min-width: 190px; line-height: 1.35; }
+
+/* ---------- live banner states */
+#live-banner.lb-disarmed { background: repeating-linear-gradient(135deg, #2d230b 0 14px, #281f09 14px 28px); border-bottom-color: #6b5214; color: #ffeac2; }
+#live-banner.lb-disarmed b { background: #b8860b; } #live-banner.lb-disarmed .lb-dot { background: var(--amber); }
+#live-banner.lb-dry { background: repeating-linear-gradient(135deg, #0c1d33 0 14px, #0a1a2e 14px 28px); border-bottom-color: #1f4a7a; color: #d6e8ff; }
+#live-banner.lb-dry b { background: #2d6fc0; } #live-banner.lb-dry .lb-dot { background: var(--blue); }
+#live-banner.lb-hot { background: repeating-linear-gradient(135deg, #5a0c18 0 14px, #4a0913 14px 28px); border-bottom-color: #ff5a6a; color: #fff; }
+#live-banner.lb-hot b { background: #ff2d48; animation: hotpulse 1.4s infinite; }
+@keyframes hotpulse { 50% { box-shadow: 0 0 0 4px rgba(255,45,72,.35); } }
+.chip-hot { color: #fff; background: rgba(255,45,72,.28); border-color: #ff5a6a; font-weight: 700; }
+.chip-blue { color: #d6e8ff; background: var(--blue-d); border-color: rgba(90,168,255,.45); font-weight: 700; }
+.chip-blue .dot { background: var(--blue); } .chip-amber { color: #ffeac2; background: var(--amber-d); border-color: rgba(245,183,59,.45); font-weight: 700; }
+.chip-amber .dot { background: var(--amber); }
+
+/* ---------- live panel */
+.live-body { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.live-gates { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.lg { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--line2); background: var(--panel2); min-width: 0; }
+.lg .k { font: 600 9.5px var(--mono); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+.lg .v { font: 600 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg.on { border-color: rgba(47,209,143,.35); } .lg.on .v { color: var(--green); }
+.lg.off .v { color: var(--muted); } .lg.bad { border-color: rgba(255,90,106,.45); } .lg.bad .v { color: var(--red); }
+.lg.warn { border-color: rgba(245,183,59,.4); } .lg.warn .v { color: var(--amber); }
+.lossbar { height: 3px; background: var(--line2); border-radius: 2px; overflow: hidden; margin-top: 2px; }
+.lossbar i { display: block; height: 100%; background: var(--red); }
+.live-wallet { padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--line2); font-size: 11.5px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.live-wallet .grow1 { flex: 1; min-width: 160px; }
+.live-cands .lc { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 6px 2px; border-top: 1px solid var(--line); font-size: 11.5px; }
+.live-cands .lc .why { color: var(--muted); font-size: 10.5px; }
+.live-cands .lh { font: 600 10px var(--mono); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; margin: 2px 0 2px; display: flex; justify-content: space-between; }
+.calldata { font: 10.5px/1.4 var(--mono); color: var(--text2); background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; word-break: break-all; max-height: 74px; overflow: auto; }
+.ord-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.blockers { margin: 8px 0 0; padding-left: 16px; color: #ffe0a3; font-size: 11.5px; }
+.tag.prepared { color: var(--blue); background: var(--blue-d); } .tag.confirmed { color: var(--green); background: var(--green-d); }
+.tag.failed, .tag.mismatch, .tag.refused { color: var(--red); background: var(--red-d); }
+.tag.sign_requested, .tag.submitted { color: var(--amber); background: var(--amber-d); }
+.tag.expired { color: var(--muted); }
+.ord-checks { table-layout: fixed; } .ord-checks td:nth-child(1) { width: 18px; } .ord-checks td:nth-child(2) { width: 42%; }
+.ord-checks td:nth-child(4) { width: 74px; } .ord-checks td.cd { white-space: normal; word-break: break-word; text-align: left; color: var(--text2); }
+.ord-grid > div { min-width: 0; }

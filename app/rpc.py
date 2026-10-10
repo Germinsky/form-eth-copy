@@ -1,4 +1,4 @@
-"""Read-only Ethereum JSON-RPC client (httpx). PAPER ONLY.
+"""Read-only Ethereum JSON-RPC client (httpx). Never signs, never broadcasts.
 
 Deliberately NOT web3.py: web3 pulls in eth-account (key handling / signing). This module can only
 issue read methods from READ_METHODS; anything else (eth_sendRawTransaction, eth_sign, ...) is refused
@@ -17,6 +17,7 @@ MAINNET_CHAIN_ID = 1
 READ_METHODS = frozenset({
     "eth_chainId", "eth_blockNumber", "eth_call", "eth_getLogs", "eth_getBlockByNumber",
     "eth_getCode", "eth_getBalance", "eth_getTransactionByHash", "eth_getTransactionReceipt",
+    "eth_estimateGas", "eth_gasPrice",   # dry-run simulation only (no state change, no signature)
 })
 
 
@@ -128,6 +129,27 @@ class RpcClient:
         if not isinstance(out, str) or not out.startswith("0x"):
             raise RpcError("eth_call: non-hex result")
         return out
+
+    def simulate(self, tx: dict, block: str | int = "latest") -> str:
+        """eth_call a full unsigned tx {from,to,value,data}. Dry run: nothing is signed or sent."""
+        self.ensure_mainnet()
+        tag = hex(block) if isinstance(block, int) else block
+        out = self.call("eth_call", [tx, tag])
+        if not isinstance(out, str) or not out.startswith("0x"):
+            raise RpcError("eth_call: non-hex result")
+        return out
+
+    def estimate_gas(self, tx: dict) -> int:
+        self.ensure_mainnet()
+        return int(self.call("eth_estimateGas", [tx]), 16)
+
+    def gas_price(self) -> int:
+        return int(self.call("eth_gasPrice"), 16)
+
+    def get_balance(self, addr: str, block: str | int = "latest") -> int:
+        self.ensure_mainnet()
+        tag = hex(block) if isinstance(block, int) else block
+        return int(self.call("eth_getBalance", [addr, tag]), 16)
 
     def get_logs(self, from_block: int, to_block: int, topics: list, address: str | list | None = None) -> list:
         self.ensure_mainnet()

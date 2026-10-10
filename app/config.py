@@ -1,4 +1,12 @@
-"""Settings loaded from .env. LIVE_ENABLED must stay false — enforced here."""
+"""Settings loaded from .env. Paper is the default; the LIVE path refuses blind enable — enforced here.
+
+Live is a stack of independent gates (all default OFF), see app/live.py:
+  LIVE_ENABLED=true   requires an ARM_CODE (or ARM_CODE_SHA256) and a per-trade cap <= $500, else startup refuses
+  LIVE_ARMED=true     config-side consent; still needs a runtime arm (ARM_CODE + typed phrase, expires)
+  LIVE_BROADCAST=true without it the desk only prepares + simulates (dry run); the UI never calls
+                      eth_sendTransaction
+The server never holds keys: it returns UNSIGNED calldata; a browser wallet signs and broadcasts.
+"""
 from __future__ import annotations
 
 import os
@@ -13,8 +21,12 @@ load_dotenv(ROOT / ".env")
 TRUTHY = {"1", "true", "yes", "on"}
 
 
+HARD_MAX_TRADE_USD = 500.0   # user-locked ceiling; no env value can raise it
+_PLACEHOLDER_CODES = {"", "changeme", "change-me", "<set-me>", "your_arm_code", "0000", "1234"}
+
+
 class LiveTradingForbidden(RuntimeError):
-    """Raised when anything tries to turn live trading on. This MVP is paper only."""
+    """Raised when live trading is turned on unsafely (blind enable, missing arm code, cap > $500, keys in env)."""
 
 
 def _f(name: str, default: float) -> float:
@@ -76,6 +88,23 @@ class Settings:
     auto_tick_seconds: int
     db_path: Path
     record_path: Path
+    # ---- live (browser-wallet signed). All default off / conservative.
+    live_armed: bool = False
+    live_broadcast: bool = False
+    arm_code: str = ""            # never exposed via public(); prefer ARM_CODE_SHA256
+    arm_code_sha256: str = ""
+    live_arm_ttl_s: int = 900
+    live_trade_usd: float = 100.0
+    live_max_trade_usd: float = HARD_MAX_TRADE_USD
+    live_daily_loss_limit_usd: float = 150.0
+    live_max_trades_per_day: int = 10
+    live_max_impact_pct: float = 1.5
+    live_max_slippage_bps: int = 100
+    live_liquidity_floor_usd: float = 250_000.0
+    live_quote_ttl_s: int = 60
+    live_deadline_s: int = 120
+    live_allowed_senders: tuple = ()
+    live_min_cluster_wallets: int = 0   # 0 = follow CLUSTER_REQUIRED / CLUSTER_MIN_WALLETS
 
     @property
     def rpc_configured(self) -> bool:
@@ -111,7 +140,20 @@ class Settings:
         d["signal_fixture"] = str(self.signal_fixture)
         d["db_path"] = str(self.db_path)
         d["record_path"] = str(self.record_path)
+        d.pop("arm_code", None)
+        d.pop("arm_code_sha256", None)
+        d["arm_code_configured"] = self.arm_code_configured
+        d["live_allowed_senders"] = list(self.live_allowed_senders)
+        d["live_hard_max_trade_usd"] = HARD_MAX_TRADE_USD
         return d
+
+    @property
+    def arm_code_configured(self) -> bool:
+        return bool(self.arm_code_sha256) or (self.arm_code.strip().lower() not in _PLACEHOLDER_CODES)
+
+    @property
+    def live_cap_usd(self) -> float:
+        return min(self.live_max_trade_usd, HARD_MAX_TRADE_USD)
 
 
 def _redact(url: str) -> str:
@@ -166,6 +208,23 @@ def load_settings() -> Settings:
         auto_tick_seconds=_i("AUTO_TICK_SECONDS", 0),
         db_path=_path("DB_PATH", "data/form.db"),
         record_path=_path("RECORD_PATH", "data/the_record.jsonl"),
+        live_armed=_b("LIVE_ARMED", False),
+        live_broadcast=_b("LIVE_BROADCAST", False),
+        arm_code=os.getenv("ARM_CODE", "").strip(),
+        arm_code_sha256=os.getenv("ARM_CODE_SHA256", "").strip().lower(),
+        live_arm_ttl_s=_i("LIVE_ARM_TTL_S", 900),
+        live_trade_usd=_f("LIVE_TRADE_USD", 100),
+        live_max_trade_usd=_f("LIVE_MAX_TRADE_USD", HARD_MAX_TRADE_USD),
+        live_daily_loss_limit_usd=_f("LIVE_DAILY_LOSS_LIMIT_USD", 150),
+        live_max_trades_per_day=_i("LIVE_MAX_TRADES_PER_DAY", 10),
+        live_max_impact_pct=_f("LIVE_MAX_IMPACT_PCT", 1.5),
+        live_max_slippage_bps=_i("LIVE_MAX_SLIPPAGE_BPS", 100),
+        live_liquidity_floor_usd=_f("LIVE_LIQUIDITY_FLOOR_USD", 250_000),
+        live_quote_ttl_s=_i("LIVE_QUOTE_TTL_S", 60),
+        live_deadline_s=_i("LIVE_DEADLINE_S", 120),
+        live_allowed_senders=tuple(a.strip().lower() for a in os.getenv("LIVE_ALLOWED_SENDERS", "").split(",")
+                                   if a.strip()),
+        live_min_cluster_wallets=_i("LIVE_MIN_CLUSTER_WALLETS", 0),
     )
     assert_live_dark(s)
     if s.data_mode not in ("demo", "rpc", "hybrid"):
@@ -179,12 +238,38 @@ def load_settings() -> Settings:
     return s
 
 
+_KEY_ENV_NAMES = ("PRIVATE_KEY", "ETH_PRIVATE_KEY", "WALLET_PRIVATE_KEY", "MNEMONIC", "SEED_PHRASE", "SIGNER_KEY")
+
+
 def assert_live_dark(s: Settings) -> None:
-    if s.live_enabled:
-        raise LiveTradingForbidden(
-            "LIVE_ENABLED is true. This build is PAPER ONLY: there is no signer, no key "
-            "handling and no order routing. Set LIVE_ENABLED=false."
-        )
+    """Refuse unsafe live configs. Called at startup and on every paper tick / live action.
+    Name kept for compatibility: with LIVE_ENABLED=false this is the old 'live must stay dark' check."""
+    leaked = [k for k in _KEY_ENV_NAMES if os.getenv(k)]
+    if leaked:
+        raise LiveTradingForbidden(f"{', '.join(leaked)} is set. This desk never holds keys: the browser wallet "
+                                   "signs. Remove it from the environment / .env.")
+    live_flags = [n for n, v in (("LIVE_ARMED", s.live_armed), ("LIVE_BROADCAST", s.live_broadcast)) if v]
+    if not s.live_enabled:
+        if live_flags:
+            raise LiveTradingForbidden(f"{'/'.join(live_flags)} set while LIVE_ENABLED=false. Refusing an "
+                                       "ambiguous config: turn LIVE_ENABLED on deliberately or clear these.")
+        return
+    if not s.arm_code_configured:
+        raise LiveTradingForbidden("LIVE_ENABLED=true without ARM_CODE / ARM_CODE_SHA256: blind enable refused.")
+    if s.arm_code and not s.arm_code_sha256 and len(s.arm_code) < 12:
+        raise LiveTradingForbidden("ARM_CODE must be at least 12 characters (or use ARM_CODE_SHA256).")
+    if s.arm_code_sha256 and (len(s.arm_code_sha256) != 64 or any(c not in "0123456789abcdef" for c in s.arm_code_sha256)):
+        raise LiveTradingForbidden("ARM_CODE_SHA256 must be 64 hex chars (sha256 of your arm code).")
+    if s.live_max_trade_usd > HARD_MAX_TRADE_USD or s.live_trade_usd > HARD_MAX_TRADE_USD:
+        raise LiveTradingForbidden(f"LIVE_MAX_TRADE_USD / LIVE_TRADE_USD above the locked ${HARD_MAX_TRADE_USD:.0f} cap.")
+    if s.live_trade_usd <= 0 or s.live_max_trade_usd <= 0 or s.live_daily_loss_limit_usd <= 0:
+        raise LiveTradingForbidden("LIVE_TRADE_USD, LIVE_MAX_TRADE_USD and LIVE_DAILY_LOSS_LIMIT_USD must be > 0.")
+    if not (0 < s.live_max_slippage_bps <= 500) or not (0 < s.live_max_impact_pct <= 5):
+        raise LiveTradingForbidden("LIVE_MAX_SLIPPAGE_BPS must be 1..500 and LIVE_MAX_IMPACT_PCT 0..5.")
+    if s.live_liquidity_floor_usd < s.liquidity_floor_usd:
+        raise LiveTradingForbidden("LIVE_LIQUIDITY_FLOOR_USD may not be looser than the paper LIQUIDITY_FLOOR_USD.")
+    if not s.rpc_configured:
+        raise LiveTradingForbidden("LIVE_ENABLED=true needs ETH_RPC_URL (pool reads + simulation). Refusing.")
 
 
 settings = load_settings()

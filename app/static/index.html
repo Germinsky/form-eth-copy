@@ -8,13 +8,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/static/style.css?v=2">
+<link rel="stylesheet" href="/static/style.css?v=3">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0f17'/%3E%3Cpath d='M9 8h14v4H13.5v3H21v4h-7.5v5H9z' fill='%2337d399'/%3E%3C/svg%3E">
 </head>
 <body>
-<div id="live-banner" role="alert" aria-live="polite">
+<div id="live-banner" class="lb-off" role="alert" aria-live="polite">
   <span class="lb-dot"></span>
-  <b>LIVE OFF</b><span class="lb-sep">·</span>PAPER ONLY<span class="lb-sep">·</span>NO KEYS<span class="lb-sep">·</span>NO SIGNING<span class="lb-sep">·</span>SIMULATED FILLS ON ETHEREUM MAINNET DATA
+  <b>LIVE OFF</b><span class="lb-sep">·</span>PAPER (DEFAULT)<span class="lb-sep">·</span>SERVER HOLDS NO KEYS<span class="lb-sep">·</span>SIMULATED FILLS ON ETHEREUM MAINNET DATA
 </div>
 
 <header id="topbar">
@@ -93,6 +93,18 @@
   </div>
 
   <div class="col">
+    <section class="panel" id="p-live" aria-labelledby="h-live">
+      <div class="panel-head">
+        <h2 id="h-live">Live execution <span class="muted sm">browser wallet signs · cap $500</span></h2>
+        <div class="panel-tools" id="live-tools"></div>
+      </div>
+      <div class="live-body">
+        <div id="live-gates" class="live-gates"></div>
+        <div id="live-wallet" class="live-wallet"></div>
+        <div id="live-cands" class="live-cands"></div>
+      </div>
+    </section>
+
     <section class="panel" id="p-quote" aria-labelledby="h-quote">
       <div class="panel-head">
         <h2 id="h-quote">Quote lookup <span class="muted sm">Uniswap · read-only</span></h2>
@@ -133,7 +145,7 @@
 </main>
 
 <footer id="foot">
-  <span>FORM · paper only · nothing here is advice · all P&amp;L simulated</span>
+  <span>FORM · paper by default · live only when armed, signed in your own wallet, ≤ $500/trade · nothing here is advice</span>
   <span id="foot-updated" class="mono"></span>
 </footer>
 
@@ -203,8 +215,32 @@
   </form>
 </dialog>
 
+<dialog id="dlg-arm" class="dialog dialog-sm" aria-labelledby="da-title">
+  <form id="arm-form" class="dlg-form" autocomplete="off">
+    <div class="dlg-head"><h3 id="da-title">Arm live trading</h3><button type="button" class="btn btn-icon btn-sm" data-close aria-label="close">✕</button></div>
+    <div class="dlg-body">
+      <p class="muted sm" style="margin:0 0 10px">Dual confirmation: your <b>ARM_CODE</b> (set in <span class="mono">.env</span>, never shown) <b>and</b> the typed phrase. Arming expires automatically. This is <b>not</b> a wallet key — never paste a private key or seed phrase anywhere in this desk.</p>
+      <label class="field">Arm code<input name="code" class="input mono" type="password" autocomplete="off" required></label>
+      <label class="field" style="margin-top:10px">Type <span class="mono" id="arm-phrase-hint"></span><input name="phrase" class="input mono" autocomplete="off" spellcheck="false" required></label>
+      <div id="arm-note" class="muted sm" style="margin-top:10px"></div>
+    </div>
+    <div class="dlg-foot"><span></span><div>
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn btn-danger" id="arm-submit">Arm</button>
+    </div></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-order" class="dialog" aria-labelledby="do-title">
+  <form method="dialog" class="dlg-form">
+    <div class="dlg-head"><h3 id="do-title">Live order</h3><button class="btn btn-icon btn-sm" value="close" aria-label="close">✕</button></div>
+    <div class="dlg-body" id="do-body"></div>
+    <div class="dlg-foot"><span class="muted sm" id="do-foot"></span><div id="do-actions"></div></div>
+  </form>
+</dialog>
+
 <div id="toasts" aria-live="polite"></div>
 <div id="tip" role="tooltip"></div>
-<script src="/static/app.js?v=2"></script>
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>

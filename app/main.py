@@ -1,4 +1,4 @@
-"""FastAPI app: API + single-page dashboard. PAPER ONLY."""
+"""FastAPI app: API + single-page dashboard. Paper by default; gated browser-signed LIVE path in app/live.py."""
 from __future__ import annotations
 
 import asyncio
@@ -7,13 +7,14 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import ROOT, settings
 from .gates import score_wallet
+from .live import LiveDesk, LiveRefused
 from .live_signals import LiveSignalScanner, LiveSource
 from .market import FixtureMarket, LiveMarket
 from .paper import PaperEngine
@@ -40,6 +41,7 @@ scanner = LiveSignalScanner(settings, rpc, store, record, uni) if rpc else None
 source = LiveSource(scanner, store) if (settings.live_signals and scanner) else DemoSource(settings.signal_fixture)
 market = LiveMarket(source, uni, settings.data_mode) if (settings.live_reads and uni) else FixtureMarket(source)
 engine = PaperEngine(settings, store, record, source, market)
+live = LiveDesk(settings, store, record, rpc, uni)
 
 
 def seed_wallets() -> int:
@@ -78,12 +80,14 @@ async def _auto_loop():
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    record.append("session_start", "fact", {"live_enabled": False, "data_mode": settings.data_mode,
+    record.append("session_start", "fact", {"live_enabled": settings.live_enabled,
+                                            "live_armed_config": settings.live_armed,
+                                            "live_broadcast": settings.live_broadcast, "data_mode": settings.data_mode,
                                             "effective_data_mode": settings.effective_data_mode,
                                             "chain_id": settings.expected_chain_id, "source": source.name,
                                             "signal_source": settings.signal_source,
                                             "market": market.name, "rpc_configured": settings.rpc_configured,
-                                            "note": "paper only; no signer present in this build"})
+                                            "note": "paper default; live = browser-wallet signs, server holds no key"})
     if settings.data_mode != "demo" and not settings.rpc_configured:
         record.append("data_mode_fallback", "unknown", {
             "requested": settings.data_mode, "effective": "demo",
@@ -102,7 +106,7 @@ async def lifespan(_: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="FORM ETH Copy Desk (PAPER ONLY)", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="FORM ETH Copy Desk (paper default, gated live)", version="0.1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
@@ -161,7 +165,8 @@ def _live_status() -> dict:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "live_enabled": False, "mode": "PAPER", "chain": "ethereum-mainnet", "chain_id": 1,
+    return {"ok": True, "live_enabled": settings.live_enabled, "mode": "PAPER",
+            "live": {"mode": live.status()["mode"], "broadcast": settings.live_broadcast}, "chain": "ethereum-mainnet", "chain_id": 1,
             "data_mode": settings.data_mode, "effective_data_mode": settings.effective_data_mode,
             "market": market.name, "signal_source": source.name, "signal_source_requested": settings.signal_source,
             "session": SESSION, "sim_t": engine.sim_t, "sim_end_t": source.end_t, "tape_done": engine.done,
@@ -435,3 +440,121 @@ def live_scan_wallet(wallet: str, blocks: int = Query(300, ge=1, le=5000)):
     res["wallet"] = wallet.lower()
     res["note"] = "read-only ad-hoc scan; not persisted, not fed to the paper engine"
     return res
+
+
+# ---------------------------------------------------------------- LIVE (browser-wallet signed; gated; see app/live.py)
+def _same_origin(request: Request) -> None:
+    """CSRF guard for state-changing live routes: a custom header forces a CORS preflight (which this app never
+    answers), and a present Origin must be this server. Blocks a random web page from driving the desk."""
+    if request.headers.get("x-form-desk") != "1":
+        raise HTTPException(403, {"error": "missing X-Form-Desk header", "layer": "fact"})
+    origin = request.headers.get("origin")
+    if origin and origin.split("://", 1)[-1] != request.headers.get("host"):
+        raise HTTPException(403, {"error": "cross-origin live request refused", "layer": "fact"})
+
+
+def _live(fn, *a):
+    try:
+        return fn(*a)
+    except LiveRefused as e:
+        raise HTTPException(e.status, e.detail()) from None
+
+
+class ArmIn(BaseModel):
+    code: str = Field(..., max_length=256)
+    phrase: str = Field(..., max_length=64)
+
+
+class CodeIn(BaseModel):
+    code: str = Field(..., max_length=256)
+
+
+class PrepareIn(BaseModel):
+    ref: str = Field(..., description="buy:<paper_position_id> | sell:<live_position_id>")
+    sender: str = Field(..., description="connected browser-wallet address (public address only)")
+
+
+class ConfirmIn(BaseModel):
+    sender: str
+    confirm: bool = False
+
+
+class SubmittedIn(BaseModel):
+    tx_hash: str
+
+
+class ReasonIn(BaseModel):
+    reason: str | None = None
+
+
+guard = [Depends(_same_origin)]
+
+
+@app.get("/api/live/status")
+def live_status():
+    return live.status()
+
+
+@app.get("/api/live/candidates")
+def live_candidates():
+    return live.candidates()
+
+
+@app.get("/api/live/orders")
+def live_orders(limit: int = Query(50, ge=1, le=500)):
+    return live.orders(limit)
+
+
+@app.get("/api/live/orders/{oid}")
+def live_order(oid: str):
+    return _live(live.order_view, oid)
+
+
+@app.get("/api/live/positions")
+def live_positions():
+    return live.positions()
+
+
+@app.post("/api/live/arm", dependencies=guard)
+def live_arm(body: ArmIn):
+    return _live(live.arm, body.code, body.phrase)
+
+
+@app.post("/api/live/disarm", dependencies=guard)
+def live_disarm():
+    return live.disarm("operator")
+
+
+@app.post("/api/live/kill", dependencies=guard)
+def live_kill(body: ReasonIn):
+    return live.trip_kill("manual: " + (body.reason or "operator"))
+
+
+@app.post("/api/live/kill/reset", dependencies=guard)
+def live_kill_reset(body: CodeIn):
+    return _live(live.reset_kill, body.code)
+
+
+@app.post("/api/live/prepare", dependencies=guard)
+async def live_prepare(body: PrepareIn):
+    return await asyncio.to_thread(_live, live.prepare, body.ref, body.sender)
+
+
+@app.post("/api/live/orders/{oid}/confirm", dependencies=guard)
+def live_confirm(oid: str, body: ConfirmIn):
+    return _live(live.confirm, oid, body.sender, body.confirm)
+
+
+@app.post("/api/live/orders/{oid}/submitted", dependencies=guard)
+async def live_submitted(oid: str, body: SubmittedIn):
+    return await asyncio.to_thread(_live, live.submitted, oid, body.tx_hash)
+
+
+@app.post("/api/live/orders/{oid}/rejected", dependencies=guard)
+def live_rejected(oid: str, body: ReasonIn):
+    return _live(live.rejected, oid, body.reason or "")
+
+
+@app.post("/api/live/orders/{oid}/poll", dependencies=guard)
+async def live_poll_order(oid: str):
+    return await asyncio.to_thread(_live, live.poll, oid)

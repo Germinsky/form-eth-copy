@@ -1,4 +1,6 @@
-/* FORM · ETH Copy Desk — operator console (vanilla JS, no build). PAPER ONLY. */
+/* FORM · ETH Copy Desk — operator console (vanilla JS, no build). Paper by default.
+   LIVE path: the server returns UNSIGNED calldata; YOUR browser wallet (window.ethereum) signs + broadcasts.
+   This page never asks for, stores or transmits a private key / seed phrase. */
 "use strict";
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -54,7 +56,8 @@ function errText(j, status) {
   return `HTTP ${status}`;
 }
 async function api(path, opts = {}) {
-  if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers = { "Content-Type": "application/json" }; delete opts.json; }
+  opts.headers = { "X-Form-Desk": "1", ...(opts.headers || {}) };   // CSRF guard header (server requires it on live POSTs)
+  if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers["Content-Type"] = "application/json"; delete opts.json; }
   let r;
   try { r = await fetch(path, opts); } catch (e) { const err = new Error("Desk API unreachable — is uvicorn running on :8787?"); err.network = true; throw err; }
   const j = await r.json().catch(() => ({}));
@@ -96,7 +99,12 @@ function renderChips() {
   const rpc = h.rpc || {};
   const mode = h.effective_data_mode || h.data_mode;
   const live = h.live_signals;
-  const chips = [`<span class="chip chip-danger" data-tip="Live trading is hard-disabled. No keys, no signer, no tx builder. LIVE_ENABLED=true refuses to start."><i class="dot"></i>LIVE OFF · ${esc(h.mode)}</span>`];
+  const lm = S.liveSt?.mode || "OFF";
+  const LCHIP = { OFF: ["chip-danger", "LIVE OFF · PAPER", "Live is off. Paper is the default. LIVE_ENABLED=true without an ARM_CODE refuses to start."],
+    DISARMED: ["chip-amber", "LIVE DISARMED", "LIVE_ENABLED, but not armed: prepare + simulate only."],
+    ARMED_DRY_RUN: ["chip-blue", "LIVE ARMED · DRY RUN", "Armed, LIVE_BROADCAST=false: nothing can be sent."],
+    ARMED_BROADCAST: ["chip-hot", "LIVE ARMED · BROADCAST", "Armed + broadcast: your wallet can sign real trades (≤ cap) after you confirm each one."] }[lm];
+  const chips = [`<span class="chip ${LCHIP[0]}" data-tip="${esc(LCHIP[2])}"><i class="dot"></i>${LCHIP[1]}</span>`];
   chips.push(`<span class="chip" data-tip="Chain ID ${esc(h.chain_id)} verified before every client's first read"><span class="k">chain</span><b>Ethereum</b><span class="k">#${esc(h.chain_id)}</span></span>`);
   if (rpc.configured === false) chips.push(`<span class="chip chip-warn" data-tip="${esc(rpc.note || "")}"><i class="dot"></i><span class="k">rpc</span><b>off</b></span>`);
   else if (rpc.ok) chips.push(`<span class="chip chip-ok" data-tip="Latest block (probe cached ≤30s) · ${esc(rpc.calls ?? 0)} RPC calls this session"><i class="dot"></i><span class="k">block</span><b>${Number(rpc.block).toLocaleString("en-US")}</b></span>`);
@@ -564,6 +572,7 @@ async function refresh() {
       records: S.recPaused ? Promise.resolve(S.records) : api("/api/records?limit=400"),
       live: live ? api("/api/signals/live?limit=100") : Promise.resolve([]),
       config: S.config ? Promise.resolve(S.config) : api("/api/config"),
+      liveSt: api("/api/live/status"), liveCands: api("/api/live/candidates"), liveOrders: api("/api/live/orders?limit=8"),
     };
     const keys = Object.keys(jobs), res = await Promise.allSettled(Object.values(jobs));
     const errs = [];
@@ -572,7 +581,7 @@ async function refresh() {
       failStreak++;
       if (failStreak === 1 || failStreak % 12 === 0) toast("err", "Refresh failed", errs[0]);
     } else { if (failStreak) toast("ok", "Reconnected", "Desk API is back."); failStreak = 0; }
-    renderChips(); renderGateLegend(); renderKpis(); renderEquity(); renderWallets(); renderPositions(); renderFlow(); renderRecords();
+    renderLive(); renderChips(); renderGateLegend(); renderKpis(); renderEquity(); renderWallets(); renderPositions(); renderFlow(); renderRecords();
     if (S.first && !$("#quote").innerHTML.trim()) renderQuoteIdle();
     S.first = false;
     $("#foot-updated").textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}${errs.length ? " · ⚠ partial" : ""}`;
@@ -599,6 +608,231 @@ document.addEventListener("keydown", (e) => {
   const fn = map[k.length === 1 ? k.toLowerCase() : k];
   if (fn && !(k.length === 1 && k !== k.toLowerCase() && k !== "?" && k !== "/")) { e.preventDefault(); fn(); }
 });
+
+
+// ---------------------------------------------------------------- LIVE execution (browser wallet signs)
+const W = { eth: null, account: null, chainId: null };
+function detectWallet() { W.eth = typeof window !== "undefined" && window.ethereum ? window.ethereum : null; return W.eth; }
+detectWallet();
+window.addEventListener("ethereum#initialized", () => { detectWallet(); renderLive(); }, { once: true });
+if (W.eth?.on) {
+  W.eth.on("accountsChanged", (a) => { W.account = (a && a[0] || "").toLowerCase() || null; renderLive(); });
+  W.eth.on("chainChanged", (c) => { W.chainId = c; renderLive(); });
+}
+async function connectWallet() {
+  if (!detectWallet()) { toast("warn", "No injected wallet", "Install MetaMask (or Rabby / Coinbase Wallet) — see the instructions in the Live panel."); return; }
+  try {
+    const accts = await W.eth.request({ method: "eth_requestAccounts" });
+    W.account = (accts[0] || "").toLowerCase() || null;
+    W.chainId = await W.eth.request({ method: "eth_chainId" });
+    toast("ok", "Wallet connected", short(W.account) + (W.chainId !== "0x1" ? " · WRONG CHAIN " + W.chainId : " · Ethereum mainnet"));
+  } catch (e) { toast("err", "Wallet connection refused", e.message || String(e)); }
+  renderLive();
+}
+const BANNER = {
+  OFF: ["lb-off", "LIVE OFF", ["PAPER (DEFAULT)", "SERVER HOLDS NO KEYS", "SIMULATED FILLS ON ETHEREUM MAINNET DATA"]],
+  DISARMED: ["lb-disarmed", "LIVE DISARMED", ["PREPARE + SIMULATE ONLY", "ARM WITH ARM_CODE + PHRASE", "SERVER HOLDS NO KEYS"]],
+  ARMED_DRY_RUN: ["lb-dry", "LIVE ARMED · DRY RUN", ["LIVE_BROADCAST=false", "NOTHING CAN BE SENT", "SERVER HOLDS NO KEYS"]],
+  ARMED_BROADCAST: ["lb-hot", "LIVE ARMED · BROADCAST ON", ["YOUR WALLET SIGNS EVERY TRADE", "CONFIRM EACH ONE", "CAP $CAP / TRADE", "KILL SWITCH ARMED"]],
+};
+function renderBanner(st) {
+  const [c, b, parts] = BANNER[st?.mode || "OFF"];
+  const cap = st?.caps?.max_trade_usd ?? 500;
+  const el = $("#live-banner"); el.className = c;
+  let extra = "";
+  if (st?.mode === "ARMED_BROADCAST" || st?.mode === "ARMED_DRY_RUN") extra = `<span class="lb-sep">·</span>DISARMS <span id="lb-ttl"></span>`;
+  el.innerHTML = `<span class="lb-dot"></span><b>${b}</b>${parts.map((p) => `<span class="lb-sep">·</span>${esc(p.replace("$CAP", "$" + cap))}`).join("")}${extra}`;
+}
+function ttlText(until) { const s = Math.max(0, Math.round(until - Date.now() / 1000)); return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`; }
+setInterval(() => { const st = S.liveSt; if (st?.armed_until) { const t = ttlText(st.armed_until); const a = $("#lb-ttl"); if (a) a.textContent = "IN " + t; const b = $("#lg-arm-ttl"); if (b) b.textContent = t; } }, 1000);
+
+function gateBox(k, v, cls, tip) { return `<div class="lg ${cls}" ${tip ? `data-tip="${esc(tip)}"` : ""}><span class="k">${k}</span><span class="v">${v}</span></div>`; }
+function renderLive() {
+  const st = S.liveSt; if (!st) return;
+  renderBanner(st);
+  const c = st.caps, d = st.daily, k = st.kill_switch;
+  const lossPct = Math.min(100, (100 * d.loss_usd) / (c.daily_loss_limit_usd || 1));
+  $("#live-gates").innerHTML = [
+    gateBox("LIVE_ENABLED", st.live_enabled ? "on" : "off", st.live_enabled ? "on" : "off", "Master switch (.env). true without ARM_CODE refuses to start."),
+    gateBox("LIVE_ARMED cfg", st.live_armed_config ? "on" : "off", st.live_armed_config ? "on" : "off", "Config-side consent to allow runtime arming."),
+    gateBox("armed", st.armed ? `yes · <span id="lg-arm-ttl">${ttlText(st.armed_until)}</span>` : st.arm_locked ? "LOCKED" : "no", st.armed ? "warn" : st.arm_locked ? "bad" : "off", "Runtime arm: ARM_CODE + typed phrase; expires."),
+    gateBox("LIVE_BROADCAST", st.broadcast ? "on" : "off · dry run", st.broadcast ? "warn" : "off", "false = prepare + simulate only; the page never calls eth_sendTransaction."),
+    gateBox("kill switch", k.tripped ? "TRIPPED" : "clear", k.tripped ? "bad" : "on", k.reason || "Trips on daily loss ≥ limit, broadcast mismatch, or manually."),
+    gateBox("daily loss", `${fmtUsd(d.loss_usd, 0)} / ${fmtUsd(c.daily_loss_limit_usd, 0)}<div class="lossbar"><i style="width:${lossPct}%"></i></div>`, lossPct >= 100 ? "bad" : lossPct > 50 ? "warn" : "on", `UTC ${d.day} · trades ${d.trades}/${c.max_trades_per_day} · ${d.note}`),
+    gateBox("cap / trade", `${fmtUsd(c.trade_usd, 0)} ≤ ${fmtUsd(c.max_trade_usd, 0)}`, "on", `hard ceiling $${c.hard_max_trade_usd}`),
+    gateBox("impact · slip", `${c.max_impact_pct}% · ${c.max_slippage_bps}bp`, "on", "price impact cap (V2 curve incl. fee) · amountOutMin slippage"),
+    gateBox("liq floor · cluster", `${fmtCompact(c.liquidity_floor_usd)} · ≥${c.cluster_min_wallets}w`, "on", "live pool liquidity floor · watched+PASS source wallets required"),
+  ].join("");
+  // tools
+  const tools = [];
+  if (st.live_enabled) {
+    if (st.armed) tools.push(`<button class="btn btn-sm" data-live="disarm">Disarm</button>`);
+    else if (st.live_armed_config && !k.tripped) tools.push(`<button class="btn btn-sm btn-danger" data-live="arm" ${st.arm_locked ? "disabled" : ""}>Arm…</button>`);
+    tools.push(k.latched ? `<button class="btn btn-sm" data-live="killreset">Reset kill…</button>` : `<button class="btn btn-sm btn-ghost-danger" data-live="kill" title="Latch the kill switch + disarm">Kill</button>`);
+  }
+  $("#live-tools").innerHTML = tools.join("");
+  // wallet
+  const wEl = $("#live-wallet");
+  if (!st.live_enabled) {
+    wEl.innerHTML = `<div class="grow1"><b>Live is off.</b> <span class="muted">Paper keeps running. To prepare live trades: set <span class="mono">LIVE_ENABLED=true</span>, an <span class="mono">ARM_CODE</span> and <span class="mono">ETH_RPC_URL</span> in <span class="mono">.env</span>, restart (see README › Live trading). Server never holds keys.</span></div>`;
+  } else if (!W.eth) {
+    wEl.innerHTML = `<div class="grow1"><b>No injected wallet detected.</b> <span class="muted">Open this page in a desktop browser with MetaMask / Rabby / Coinbase Wallet, or in MetaMask Mobile's in-app browser (tunnel 127.0.0.1 yourself). <b>WalletConnect v2</b>: stub only — needs a Reown projectId + the WalletConnect provider script; not bundled (see README). This desk will <u>never</u> ask for a seed phrase or private key.</span></div>`;
+  } else if (!W.account) {
+    wEl.innerHTML = `<div class="grow1"><span class="muted">Injected wallet found. Connect to prepare + simulate from your address (public address only).</span></div><button class="btn btn-sm btn-primary" data-live="connect">Connect wallet</button>`;
+  } else {
+    const wrong = W.chainId && W.chainId !== "0x1";
+    const allowed = !c.allowed_senders.length || c.allowed_senders.includes(W.account);
+    wEl.innerHTML = `<div class="grow1"><span class="k muted">wallet</span> <span class="addr">${esc(W.account)}</span> ${wrong ? `<span class="tag FAIL">chain ${esc(W.chainId)} ≠ 1</span>` : '<span class="tag PASS">mainnet</span>'} ${allowed ? "" : '<span class="tag FAIL">not in LIVE_ALLOWED_SENDERS</span>'}</div><button class="btn btn-xs" data-live="connect">Switch</button>`;
+  }
+  // candidates + orders
+  const cands = S.liveCands || [], orders = S.liveOrders || [];
+  const canPrep = st.live_enabled && st.rpc_configured;
+  const cRows = cands.slice(0, 6).map((x) => `<div class="lc"><span class="tag ${esc(x.side)}">${esc(x.side)}</span>
+      <div><span class="sym">${esc(x.symbol || short(x.token))}</span> <span class="muted sm">${x.side === "buy" ? "paper #" + x.paper_position_id : "live #" + x.live_position_id}</span><div class="why">${esc(x.why)}${x.in_flight ? " · in flight: " + esc(x.in_flight) : ""}</div></div>
+      ${canPrep ? `<button class="btn btn-xs ${x.side === "sell" && x.suggested ? "btn-primary" : ""}" data-live="prepare" data-ref="${esc(x.ref)}" ${x.in_flight ? "disabled" : ""} title="Build + simulate the unsigned Uniswap tx">Prepare live trade</button>` : `<span class="muted sm" data-tip="${st.live_enabled ? "ETH_RPC_URL missing" : "LIVE_ENABLED=false"}">live off</span>`}</div>`).join("");
+  const oRows = orders.slice(0, 5).map((o) => `<div class="lc"><span class="tag ${esc(o.status)}">${esc(o.status)}</span>
+      <div><span class="sym">${esc(o.symbol || short(o.token))}</span> <span class="muted sm">${esc(o.kind)} ${esc(o.side)} ${o.usd_notional ? fmtUsd(o.usd_notional) : ""}</span>
+      <div class="why">${esc(o.id)}${o.tx_hash ? ` · <a class="addr" href="https://etherscan.io/tx/${esc(o.tx_hash)}" target="_blank" rel="noopener">${short(o.tx_hash)}</a>` : ""}</div></div>
+      <button class="btn btn-xs" data-live="${o.status === "submitted" ? "poll" : "view"}" data-id="${esc(o.id)}">${o.status === "submitted" ? "Check" : "View"}</button></div>`).join("");
+  $("#live-cands").innerHTML = `<div class="lh"><span>Candidates (paper-approved)</span><span>${cands.length}</span></div>${cRows || '<div class="muted sm" style="padding:4px 2px">No open paper entries to copy. Live only follows trades the paper engine approved.</div>'}
+    ${orders.length ? `<div class="lh" style="margin-top:6px"><span>Recent live orders</span><span>${orders.length}</span></div>${oRows}` : ""}`;
+}
+
+function orderHtml(o) {
+  const q = o.quote || {}, sim = o.sim || {}, tx = o.tx || {};
+  const ethIn = parseInt(tx.value || "0x0", 16) / 1e18;
+  const det = (d) => {
+    if (d == null) return "";
+    if (typeof d !== "object") return String(d);
+    if (d.passing) return `${d.passing.length}/${d.sources.length} watched+PASS`;
+    if (d.pair) return `pair ${short(d.pair)} @ ${d.block}`;
+    return JSON.stringify(d);
+  };
+  const rows = (o.checks || []).map((c) => { const t = det(c.detail); return `<tr><td>${c.ok ? '<span class="icon-ok">✓</span>' : c.blocking === false ? '<span class="icon-unk">!</span>' : '<span class="icon-bad">✕</span>'}</td><td>${esc(c.check)}</td><td class="v cd" title="${esc(t)}">${esc(t.length > 70 ? t.slice(0, 70) + "…" : t)}</td><td>${layerTag(c.layer)}</td></tr>`; }).join("");
+  return `<div class="ord-grid"><div>
+      <div class="qhead"><div><span class="tag ${esc(o.side)}">${esc(o.side)}</span> <span class="sym">${esc(o.symbol || short(o.token))}</span> <span class="tag ${esc(o.status)}">${esc(o.status)}</span> <span class="muted sm">${esc(o.kind)}</span></div><span class="muted sm mono">${esc(o.id)}</span></div>
+      <div class="qgrid" style="margin-top:8px">
+        <div class="qcell"><div class="k"><span>Notional</span>${layerTag("inference")}</div><div class="v">${fmtUsd(o.usd_notional)}</div></div>
+        <div class="qcell"><div class="k"><span>${o.side === "buy" ? "ETH in" : "Tokens in (raw)"}</span></div><div class="v">${o.side === "buy" ? ethIn.toFixed(6) : esc(q.amount_in_raw || q.approve_amount_raw || "—")}</div></div>
+        <div class="qcell"><div class="k"><span>Impact</span></div><div class="v">${q.impact_pct != null ? q.impact_pct.toFixed(3) + "%" : "—"}</div></div>
+        <div class="qcell"><div class="k"><span>Slippage cap</span></div><div class="v">${q.slippage_bps ?? "—"} bp</div></div>
+        <div class="qcell"><div class="k"><span>Simulation</span>${layerTag(sim.layer || "unknown")}</div><div class="v ${sim.ok ? "pos" : "neg"}">${sim.ok ? "OK · gas " + sim.gas : "FAILED"}</div></div>
+        <div class="qcell"><div class="k"><span>Gas est.</span></div><div class="v">${sim.gas_usd_est != null ? fmtUsd(sim.gas_usd_est) : "—"}</div></div>
+      </div>
+      ${sim.ok ? "" : `<div class="gatebar unk">? ${esc(sim.error || "")} — ${esc(sim.note || "")}</div>`}
+      <div class="muted sm" style="margin-top:8px">to <span class="addr">${esc(tx.to)}</span> ${tx.to === S.liveSt?.router ? "(Uniswap V2 Router02)" : "(token approve)"} · from <span class="addr">${esc(tx.from)}</span> · chain ${esc(tx.chainId)}${q.deadline ? " · deadline " + new Date(q.deadline * 1000).toLocaleTimeString() : ""}</div>
+      <div class="muted sm" style="margin:6px 0 3px">Unsigned calldata (what your wallet will be asked to sign)</div><div class="calldata">${esc(tx.data)}</div>
+      ${o.blocked_by?.length ? `<ul class="blockers">${o.blocked_by.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>` : `<div class="gatebar ok">✓ Ready: all gates pass. Clicking confirm asks your wallet to sign — the desk never sees your key.</div>`}
+    </div><div><table class="checks ord-checks">${rows}</table></div></div>`;
+}
+let curOrder = null;
+function showOrder(o) {
+  curOrder = o;
+  $("#do-title").textContent = `Live ${o.kind === "approve" ? "approval" : "trade"} · ${o.symbol || short(o.token)}`;
+  $("#do-body").innerHTML = orderHtml(o);
+  const st = S.liveSt || {};
+  const acts = [`<button class="btn" value="close">Close</button>`];
+  if (["prepared", "expired", "rejected"].includes(o.status)) acts.push(`<button type="button" class="btn" id="do-reprep">Re-prepare</button>`);
+  if (o.status === "prepared") {
+    if (!st.broadcast) acts.push(`<button type="button" class="btn" disabled title="LIVE_BROADCAST=false">Dry run · broadcast disabled</button>`);
+    else acts.push(`<button type="button" class="btn btn-danger" id="do-sign" ${o.ready_to_sign && W.account ? "" : "disabled"}>Confirm &amp; sign in wallet</button>`);
+  }
+  if (o.status === "submitted") acts.push(`<button type="button" class="btn btn-primary" id="do-poll">Check receipt</button>`);
+  $("#do-actions").innerHTML = acts.join("");
+  $("#do-foot").textContent = st.broadcast ? `expires ${new Date(o.expires_at * 1000).toLocaleTimeString()}` : "DRY RUN: prepare + simulate only";
+  const d = $("#dlg-order"); if (!d.open) d.showModal();
+  $("#do-reprep")?.addEventListener("click", () => prepareLive(o.ref));
+  $("#do-sign")?.addEventListener("click", () => signOrder(o));
+  $("#do-poll")?.addEventListener("click", () => pollOrder(o.id, true));
+}
+async function prepareLive(ref) {
+  if (!W.account) { await connectWallet(); if (!W.account) return; }
+  try {
+    const o = await api("/api/live/prepare", { method: "POST", json: { ref, sender: W.account } });
+    toast(o.sim?.ok ? "ok" : "warn", "Live order prepared", `${o.symbol || ""} ${o.kind} · sim ${o.sim?.ok ? "OK" : "FAILED"}${S.liveSt?.broadcast ? "" : " · dry run"}`);
+    showOrder(o);
+  } catch (err) {
+    const d = err.body?.detail;
+    toast(d?.layer === "unknown" ? "warn" : "err", "Live prepare refused", err.message);
+  }
+  refresh();
+}
+async function signOrder(o) {
+  // Client-side guardrails (defence in depth; the server re-checks everything on /confirm)
+  try {
+    if (!detectWallet()) throw new Error("no injected wallet");
+    const chain = await W.eth.request({ method: "eth_chainId" });
+    if (chain !== "0x1") throw new Error(`wallet is on chain ${chain}; switch to Ethereum mainnet`);
+    const [acct] = await W.eth.request({ method: "eth_accounts" });
+    if ((acct || "").toLowerCase() !== o.sender) throw new Error("connected account differs from the order's sender");
+    const st = S.liveSt, cap = st.caps.max_trade_usd;
+    const usd = o.side === "buy" ? (parseInt(o.tx.value, 16) / 1e18) * (o.quote.eth_usd || 0) : o.usd_notional || 0;
+    if (usd > cap + 1e-6) throw new Error(`notional ${fmtUsd(usd)} above cap ${fmtUsd(cap)}`);
+    if (![st.router, o.token].includes(o.tx.to)) throw new Error("unexpected tx target");
+    $("#dlg-order").close();
+    const ok = await confirmDlg("Sign a LIVE transaction?", `<b>${esc(o.kind)} ${esc(o.side)} ${esc(o.symbol || short(o.token))}</b> · ${fmtUsd(usd)} · max slippage ${o.quote.slippage_bps ?? "—"} bp<br><span class="muted">Your wallet will open. Check the amount, the destination <span class="addr">${short(o.tx.to)}</span> and the network before signing. Real funds, irreversible.</span>`, "Confirm & open wallet");
+    if (!ok) { toast("info", "Cancelled", "Nothing was signed."); return; }
+    const r = await api(`/api/live/orders/${o.id}/confirm`, { method: "POST", json: { sender: acct.toLowerCase(), confirm: true } });
+    if (!S.liveSt.broadcast) throw new Error("dry run");   // belt and braces
+    let hash;
+    try {
+      hash = await W.eth.request({ method: "eth_sendTransaction", params: [{ from: r.tx.from, to: r.tx.to, value: r.tx.value, data: r.tx.data }] });
+    } catch (e) {
+      await api(`/api/live/orders/${o.id}/rejected`, { method: "POST", json: { reason: e.message || String(e) } }).catch(() => {});
+      toast("info", "Not signed", e.message || "Rejected in wallet"); refresh(); return;
+    }
+    const v = await api(`/api/live/orders/${o.id}/submitted`, { method: "POST", json: { tx_hash: hash } });
+    toast(v.status === "mismatch" ? "err" : "ok", v.status === "mismatch" ? "Broadcast MISMATCH — kill switch latched" : "Broadcast by your wallet", short(hash));
+    pollOrder(o.id);
+  } catch (err) { toast("err", "Live sign aborted", err.message); }
+  refresh();
+}
+async function pollOrder(id, once = false) {
+  for (let i = 0; i < (once ? 1 : 40); i++) {
+    try {
+      const o = await api(`/api/live/orders/${id}/poll`, { method: "POST" });
+      if (o.status !== "submitted") { toast(o.status === "confirmed" ? "ok" : "err", `Live order ${o.status}`, o.tx_hash ? short(o.tx_hash) : ""); refresh(); if (once) showOrder(o); return; }
+      if (once) { toast("info", "Still pending", o.verified ? "seen on chain, awaiting receipt" : "not yet visible on chain"); return; }
+    } catch (err) { toast("err", "Poll failed", err.message); return; }
+    await new Promise((r) => setTimeout(r, 6000));
+  }
+}
+$("#p-live").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-live]"); if (!b) return;
+  const a = b.dataset.live;
+  if (a === "connect") return connectWallet();
+  if (a === "prepare") return withBusy(b, () => prepareLive(b.dataset.ref));
+  if (a === "view") return api(`/api/live/orders/${b.dataset.id}`).then(showOrder).catch((err) => toast("err", "Load failed", err.message));
+  if (a === "poll") return withBusy(b, () => pollOrder(b.dataset.id, true));
+  if (a === "disarm") return api("/api/live/disarm", { method: "POST" }).then(() => { toast("ok", "Disarmed"); refresh(); });
+  if (a === "kill") {
+    if (!(await confirmDlg("Trip kill switch", "Latches the kill switch and disarms. New live entries are blocked until you reset it with your ARM_CODE.", "Trip kill switch"))) return;
+    return api("/api/live/kill", { method: "POST", json: { reason: "dashboard" } }).then(() => { toast("warn", "Kill switch latched"); refresh(); });
+  }
+  if (a === "arm" || a === "killreset") {
+    const f = $("#arm-form"); f.reset(); f.dataset.mode = a;
+    $("#da-title").textContent = a === "arm" ? "Arm live trading" : "Reset kill switch";
+    $("#arm-phrase-hint").textContent = a === "arm" ? `"${S.liveSt.arm_phrase}"` : "(not needed)";
+    f.elements.phrase.required = a === "arm"; f.elements.phrase.parentElement.style.display = a === "arm" ? "" : "none";
+    $("#arm-note").innerHTML = a === "arm" ? `Arms for ${Math.round(S.liveSt.caps.arm_ttl_s / 60)} min, then disarms itself (LIVE_ARM_TTL_S). ${S.liveSt.broadcast ? '<b class="neg">LIVE_BROADCAST is ON: once armed, confirmed trades go to your wallet for signing.</b>' : "LIVE_BROADCAST=false: arming still cannot send anything (dry run)."}` : "Clears a latched kill switch. A daily-loss trip still applies until the next UTC day.";
+    $("#dlg-arm").showModal(); setTimeout(() => f.elements.code.focus(), 30);
+  }
+});
+$("#dlg-arm").addEventListener("click", (e) => { if (e.target.closest("[data-close]")) $("#dlg-arm").close(); });
+$("#arm-form").onsubmit = (e) => {
+  e.preventDefault();
+  const f = e.target, code = f.elements.code.value, phrase = f.elements.phrase.value;
+  const path = f.dataset.mode === "arm" ? "/api/live/arm" : "/api/live/kill/reset";
+  withBusy($("#arm-submit"), async () => {
+    try {
+      await api(path, { method: "POST", json: f.dataset.mode === "arm" ? { code, phrase } : { code } });
+      f.reset(); $("#dlg-arm").close();
+      toast("warn", f.dataset.mode === "arm" ? "LIVE ARMED" : "Kill switch reset", f.dataset.mode === "arm" ? (S.liveSt.broadcast ? "Broadcast ON — each trade still needs your confirm + wallet signature." : "Dry run: nothing can be sent.") : "");
+    } catch (err) { f.elements.code.value = ""; toast("err", "Refused", err.message); }
+    refresh();
+  });
+};
+$("#dlg-order").addEventListener("close", () => { curOrder = null; });
 
 // ---------------------------------------------------------------- boot
 setAuto(S.auto);
