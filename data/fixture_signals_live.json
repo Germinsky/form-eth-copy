@@ -1,0 +1,22 @@
+{
+  "meta": {
+    "_comment": "HYBRID/RPC demo tape. Wallets + signal times are SYNTHETIC; token addresses are REAL mainnet ERC-20s so the paper engine reads live Uniswap V2 pools for liquidity, price and impact. Prices in fills are latest-block, not historical. Use with DATA_MODE=hybrid|rpc and SIGNAL_FIXTURE=data/fixture_signals_live.json.",
+    "chain": "ethereum-mainnet",
+    "quote": "USD"
+  },
+  "tokens": [
+    {"address": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984", "symbol": "UNI"},
+    {"address": "0x6982508145454ce325ddbe47a25d4ec3d2311933", "symbol": "PEPE"},
+    {"address": "0x5a98fcbea516cf06857215779fd812ca3bef1b32", "symbol": "LDO"},
+    {"address": "0x1111111111111111111111111111111111111111", "symbol": "NOPAIR"}
+  ],
+  "signals": [
+    {"id": "live-01", "t": 300,  "wallet": "0xa11ce00000000000000000000000000000000001", "token": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984", "side": "buy"},
+    {"id": "live-02", "t": 900,  "wallet": "0xb0b0000000000000000000000000000000000002", "token": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984", "side": "buy"},
+    {"id": "live-03", "t": 1200, "wallet": "0xa11ce00000000000000000000000000000000001", "token": "0x5a98fcbea516cf06857215779fd812ca3bef1b32", "side": "buy"},
+    {"id": "live-04", "t": 1500, "wallet": "0xb0b0000000000000000000000000000000000002", "token": "0x1111111111111111111111111111111111111111", "side": "buy"},
+    {"id": "live-05", "t": 2100, "wallet": "0xa11ce00000000000000000000000000000000001", "token": "0x6982508145454ce325ddbe47a25d4ec3d2311933", "side": "buy"},
+    {"id": "live-06", "t": 2400, "wallet": "0xb0b0000000000000000000000000000000000002", "token": "0x6982508145454ce325ddbe47a25d4ec3d2311933", "side": "buy"},
+    {"id": "live-07", "t": 3600, "wallet": "0xa11ce00000000000000000000000000000000001", "token": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984", "side": "sell"}
+  ]
+}

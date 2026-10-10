@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FORM · ETH Copy Desk · PAPER</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="live-banner">LIVE OFF · PAPER ONLY · NO KEYS · NO SIGNING · ETHEREUM MAINNET (SIMULATED FILLS)</div>
+<header>
+  <h1>FORM <span>ETH copy desk</span></h1>
+  <div id="status" class="muted">loading…</div>
+  <div class="actions">
+    <button id="btn-tick">Run paper tick</button>
+    <button id="btn-run">Run full demo cycle / poll live</button>
+    <button id="btn-reset" class="ghost">Reset paper</button>
+  </div>
+</header>
+
+<main>
+  <section class="card" id="pf-card">
+    <h2>Paper portfolio <span class="layer inference">inference</span></h2>
+    <div id="pf-stats" class="stats"></div>
+    <h3>Open positions</h3><div id="pf-open"></div>
+    <h3>Closed positions</h3><div id="pf-closed"></div>
+  </section>
+
+  <section class="card">
+    <h2>Watched / parked wallets</h2>
+    <p class="muted">Gates fail closed. Only PASS wallets can be <b>watched</b>; everything else is <b>parked</b>. Seed wallets are DEMO/fake.</p>
+    <div id="wallets"></div>
+    <details><summary>Park a wallet</summary>
+      <form id="add-wallet">
+        <input name="address" placeholder="0x… (40 hex)" required size="46">
+        <input name="label" placeholder="label">
+        <input name="independence_note" placeholder="independence note">
+        <input name="round_trips" placeholder="round trips" size="8">
+        <input name="win_rate" placeholder="win rate 0-1" size="8">
+        <input name="median_hold_min" placeholder="median hold min" size="10">
+        <input name="buys_per_day" placeholder="buys/day" size="8">
+        <input name="leftover_pct" placeholder="leftover 0-1" size="9">
+        <input name="top_coin_profit_share" placeholder="top-coin share 0-1" size="12">
+        <label><input type="checkbox" name="watch"> watch if PASS</label>
+        <button>Park</button>
+      </form>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>Paper trades <span class="layer inference">inference</span></h2>
+    <div id="trades"></div>
+  </section>
+
+  <section class="card">
+    <h2>the_record <span class="muted">(append-only JSONL)</span></h2>
+    <div class="filters">
+      layer: <select id="f-layer"><option value="">all</option><option>fact</option><option>inference</option><option>hypothesis</option><option>unknown</option></select>
+      kind: <select id="f-kind"><option value="">all</option><option>signal</option><option>skip</option><option>cluster</option><option>cluster_pending</option><option>paper_fill</option><option>paper_exit</option><option>gate_eval</option><option>tick</option><option>mtm</option><option>live_signal</option><option>live_signal_rejected</option><option>live_scan_error</option></select>
+    </div>
+    <div id="records"></div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

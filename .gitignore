@@ -1,0 +1,12 @@
+!.env.example
+*.db
+*.pyc
+.env
+.env.*
+.pytest_cache/
+.venv/
+__pycache__/
+data/*.db
+data/form.db
+data/live*.db
+data/the_record.jsonl

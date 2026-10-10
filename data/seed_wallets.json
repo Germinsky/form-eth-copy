@@ -1,0 +1,33 @@
+{
+  "_comment": "DEMO / FAKE wallets. Addresses are synthetic vanity hex, NOT real traders. Stats are invented to exercise every gate.",
+  "wallets": [
+    {"address": "0xa11ce00000000000000000000000000000000001", "label": "DEMO alice (clean swing)",
+     "independence_note": "DEMO: funded from CEX, no shared funders with other watched wallets",
+     "stats": {"source": "demo-fixture", "round_trips": 64, "win_rate": 0.62, "median_hold_min": 210,
+               "buys_per_day": 4.5, "leftover_pct": 0.12, "top_coin_profit_share": 0.31}},
+    {"address": "0xb0b0000000000000000000000000000000000002", "label": "DEMO bob (patient)",
+     "independence_note": "DEMO: separate funding path, different active hours",
+     "stats": {"source": "demo-fixture", "round_trips": 41, "win_rate": 0.58, "median_hold_min": 380,
+               "buys_per_day": 2.1, "leftover_pct": 0.20, "top_coin_profit_share": 0.38}},
+    {"address": "0xc0ffee0000000000000000000000000000000003", "label": "DEMO coffee (steady)",
+     "independence_note": "DEMO: long history, no overlap in funders",
+     "stats": {"source": "demo-fixture", "round_trips": 33, "win_rate": 0.57, "median_hold_min": 95,
+               "buys_per_day": 6.0, "leftover_pct": 0.22, "top_coin_profit_share": 0.44}},
+    {"address": "0xcafe000000000000000000000000000000000004", "label": "DEMO cafe (sprayer)",
+     "independence_note": "DEMO: independent but sprays",
+     "stats": {"source": "demo-fixture", "round_trips": 210, "win_rate": 0.51, "median_hold_min": 12,
+               "buys_per_day": 38, "leftover_pct": 0.55, "top_coin_profit_share": 0.22}},
+    {"address": "0xdead000000000000000000000000000000000005", "label": "DEMO dead (one-hit wonder)",
+     "independence_note": "DEMO: unclear",
+     "stats": {"source": "demo-fixture", "round_trips": 9, "win_rate": 0.67, "median_hold_min": 600,
+               "buys_per_day": 1.0, "leftover_pct": 0.10, "top_coin_profit_share": 0.86}},
+    {"address": "0xbeef000000000000000000000000000000000006", "label": "DEMO beef (missing data)",
+     "independence_note": "DEMO: independent",
+     "stats": {"source": "demo-fixture", "round_trips": 52, "win_rate": 0.60, "median_hold_min": null,
+               "buys_per_day": 3.0, "leftover_pct": null, "top_coin_profit_share": 0.40}},
+    {"address": "0xface000000000000000000000000000000000007", "label": "DEMO face (no independence note)",
+     "independence_note": null,
+     "stats": {"source": "demo-fixture", "round_trips": 48, "win_rate": 0.61, "median_hold_min": 150,
+               "buys_per_day": 3.5, "leftover_pct": 0.18, "top_coin_profit_share": 0.35}}
+  ]
+}

@@ -1,0 +1,7 @@
+# FORM ETH copy desk — paper only. Deliberately NO web3 signing / key libraries
+# (no web3.py, no eth-account). Chain access is read-only JSON-RPC over httpx (app/rpc.py).
+fastapi>=0.110
+uvicorn>=0.27
+python-dotenv>=1.0
+httpx>=0.27
+# test-only (optional): pytest  -> python -m pytest -q tests/
