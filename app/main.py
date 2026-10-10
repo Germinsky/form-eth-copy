@@ -245,6 +245,96 @@ def records(limit: int = Query(100, le=2000), kind: str | None = None, layer: st
     return record.tail(limit, kind, layer)
 
 
+# ---------------------------------------------------------------- dashboard helpers (read-only / no side effects)
+class GatePreviewIn(BaseModel):
+    address: str | None = None
+    independence_note: str | None = None
+    stats: dict = Field(default_factory=dict)
+
+
+@app.post("/api/gates/preview")
+def gate_preview(body: GatePreviewIn):
+    """Score a candidate wallet against the current gates WITHOUT persisting it or writing the_record."""
+    addr = (body.address or "").strip().lower()
+    valid = bool(ADDR_RE.match(addr))
+    g = score_wallet({"address": addr or None, "stats": {"source": "manual-entry", **body.stats},
+                      "independence_note": body.independence_note}, settings)
+    return {**g, "preview": True, "address_valid": valid, "exists": bool(valid and store.get_wallet(addr)),
+            "note": "preview only; not persisted, not recorded"}
+
+
+def _signal_kind(outcome: str) -> str:
+    o = (outcome or "").lower()
+    if o.startswith("paper buy"):
+        return "entry"
+    if o.startswith("paper sell"):
+        return "exit"
+    if o.startswith("cluster pending"):
+        return "pending"
+    if o.startswith("skip"):
+        return "skip"
+    return "other"
+
+
+@app.get("/api/signals/recent")
+def recent_signals(limit: int = Query(50, ge=1, le=500)):
+    """Signals the paper engine has processed this paper session (tape or live), newest first, with outcome."""
+    labels = {w["address"]: w["label"] for w in store.list_wallets()}
+    rows = store.q("SELECT * FROM signals_seen ORDER BY t DESC, rowid DESC LIMIT ?", (limit,))
+    for r in rows:
+        tok = source.token(r["token"]) or {}
+        r["symbol"] = tok.get("symbol")
+        r["wallet_label"] = labels.get(r["wallet"])
+        r["kind"] = _signal_kind(r["outcome"])
+    return rows
+
+
+def _equity_series(limit: int = 2000) -> list[dict]:
+    """Equity curve of the current paper run from mtm records (stops at the last reset / clock rewind)."""
+    pts: list[dict] = []
+    for r in record.tail(limit):   # newest first
+        if r["kind"] == "paper_reset":
+            break
+        if r["kind"] != "mtm":
+            continue
+        c = r["content"]
+        if pts and c.get("sim_t", 0) >= pts[-1]["sim_t"]:   # clock went backwards -> previous run
+            break
+        pts.append({"sim_t": c.get("sim_t", 0), "equity_usd": c.get("equity_usd"), "t_event": r["t_event"]})
+    pts.reverse()
+    return pts
+
+
+@app.get("/api/stats")
+def stats():
+    """Dashboard KPIs derived from paper state. All simulated (layer inference)."""
+    closed = store.q("SELECT pnl_usd FROM positions WHERE status='closed'")
+    wins = sum(1 for p in closed if (p["pnl_usd"] or 0) > 0)
+    tr = store.q("SELECT side, signal_price, mid_at_fill, fill_price, impact_pct, gas_usd FROM trades")
+    gaps, drifts = [], []
+    for t in tr:
+        sp, fp, mid = t["signal_price"], t["fill_price"], t["mid_at_fill"]
+        if sp and fp:   # adverse slippage vs the source wallet's price, positive = worse for us
+            gaps.append(((fp / sp - 1) if t["side"] == "buy" else (1 - fp / sp)) * 1e4)
+        if sp and mid:
+            drifts.append((mid / sp - 1) * 1e4)
+    sig = store.q("SELECT outcome FROM signals_seen")
+    counts: dict = {}
+    for s in sig:
+        k = _signal_kind(s["outcome"])
+        counts[k] = counts.get(k, 0) + 1
+    avg = lambda xs: round(sum(xs) / len(xs), 1) if xs else None
+    return {"closed_positions": len(closed), "wins": wins, "losses": len(closed) - wins,
+            "win_rate": round(wins / len(closed), 4) if closed else None,
+            "trades": len(tr), "fill_gap_bps_avg": avg(gaps), "fill_gap_bps_max": round(max(gaps), 1) if gaps else None,
+            "lag_drift_bps_avg": avg(drifts),
+            "impact_pct_avg": round(sum(t["impact_pct"] or 0 for t in tr) / len(tr), 4) if tr else None,
+            "gas_usd_total": round(sum(t["gas_usd"] or 0 for t in tr), 2),
+            "signals": {"total": len(sig), **counts},
+            "equity_series": _equity_series(), "start_usd": settings.paper_start_usd,
+            "layer": "inference", "note": "simulated paper metrics; fill gap = fill vs source-wallet price, bps"}
+
+
 @app.post("/api/paper/tick")
 def paper_tick():
     return engine.tick()

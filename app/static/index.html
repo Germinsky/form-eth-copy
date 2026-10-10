@@ -3,64 +3,208 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>FORM · ETH Copy Desk · PAPER</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/style.css?v=2">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0f17'/%3E%3Cpath d='M9 8h14v4H13.5v3H21v4h-7.5v5H9z' fill='%2337d399'/%3E%3C/svg%3E">
 </head>
 <body>
-<div id="live-banner">LIVE OFF · PAPER ONLY · NO KEYS · NO SIGNING · ETHEREUM MAINNET (SIMULATED FILLS)</div>
-<header>
-  <h1>FORM <span>ETH copy desk</span></h1>
-  <div id="status" class="muted">loading…</div>
+<div id="live-banner" role="alert" aria-live="polite">
+  <span class="lb-dot"></span>
+  <b>LIVE OFF</b><span class="lb-sep">·</span>PAPER ONLY<span class="lb-sep">·</span>NO KEYS<span class="lb-sep">·</span>NO SIGNING<span class="lb-sep">·</span>SIMULATED FILLS ON ETHEREUM MAINNET DATA
+</div>
+
+<header id="topbar">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">F</div>
+    <div>
+      <div class="brand-name">FORM <span>// ETH Copy Desk</span></div>
+      <div class="brand-sub">operator console · paper</div>
+    </div>
+  </div>
+  <div id="chips" class="chips" aria-label="desk status">
+    <span class="chip chip-danger"><i class="dot"></i>LIVE OFF</span>
+    <span class="chip skel">loading…</span>
+  </div>
   <div class="actions">
-    <button id="btn-tick">Run paper tick</button>
-    <button id="btn-run">Run full demo cycle / poll live</button>
-    <button id="btn-reset" class="ghost">Reset paper</button>
+    <button id="btn-tick" class="btn" title="Advance the paper engine one tick (T)"><span class="ico">▸</span>Run tick<kbd>T</kbd></button>
+    <button id="btn-run" class="btn btn-primary" title="Run the full demo tape / one live poll+process (R)"><span class="ico">»</span>Run cycle<kbd>R</kbd></button>
+    <button id="btn-poll" class="btn" title="Scan new blocks for watched-wallet swaps (P) — live signal mode only"><span class="ico">⟳</span>Poll live<kbd>P</kbd></button>
+    <button id="btn-reset" class="btn btn-ghost-danger" title="Clear paper positions/trades/clock; the_record is kept (Shift+X)">Reset paper<kbd>⇧X</kbd></button>
+    <span class="divider"></span>
+    <button id="btn-auto" class="btn btn-icon" aria-pressed="true" title="Auto-refresh every 5s (A)"><span class="pulse"></span><span id="auto-label">Live 5s</span></button>
+    <button id="btn-help" class="btn btn-icon" title="Keyboard shortcuts (?)">?</button>
   </div>
 </header>
 
-<main>
-  <section class="card" id="pf-card">
-    <h2>Paper portfolio <span class="layer inference">inference</span></h2>
-    <div id="pf-stats" class="stats"></div>
-    <h3>Open positions</h3><div id="pf-open"></div>
-    <h3>Closed positions</h3><div id="pf-closed"></div>
-  </section>
+<section id="kpis" class="kpis" aria-label="key metrics"></section>
 
-  <section class="card">
-    <h2>Watched / parked wallets</h2>
-    <p class="muted">Gates fail closed. Only PASS wallets can be <b>watched</b>; everything else is <b>parked</b>. Seed wallets are DEMO/fake.</p>
-    <div id="wallets"></div>
-    <details><summary>Park a wallet</summary>
-      <form id="add-wallet">
-        <input name="address" placeholder="0x… (40 hex)" required size="46">
-        <input name="label" placeholder="label">
-        <input name="independence_note" placeholder="independence note">
-        <input name="round_trips" placeholder="round trips" size="8">
-        <input name="win_rate" placeholder="win rate 0-1" size="8">
-        <input name="median_hold_min" placeholder="median hold min" size="10">
-        <input name="buys_per_day" placeholder="buys/day" size="8">
-        <input name="leftover_pct" placeholder="leftover 0-1" size="9">
-        <input name="top_coin_profit_share" placeholder="top-coin share 0-1" size="12">
-        <label><input type="checkbox" name="watch"> watch if PASS</label>
-        <button>Park</button>
-      </form>
-    </details>
-  </section>
-
-  <section class="card">
-    <h2>Paper trades <span class="layer inference">inference</span></h2>
-    <div id="trades"></div>
-  </section>
-
-  <section class="card">
-    <h2>the_record <span class="muted">(append-only JSONL)</span></h2>
-    <div class="filters">
-      layer: <select id="f-layer"><option value="">all</option><option>fact</option><option>inference</option><option>hypothesis</option><option>unknown</option></select>
-      kind: <select id="f-kind"><option value="">all</option><option>signal</option><option>skip</option><option>cluster</option><option>cluster_pending</option><option>paper_fill</option><option>paper_exit</option><option>gate_eval</option><option>tick</option><option>mtm</option><option>live_signal</option><option>live_signal_rejected</option><option>live_scan_error</option></select>
+<main id="grid">
+  <section class="panel" id="p-wallets" aria-labelledby="h-wallets">
+    <div class="panel-head">
+      <h2 id="h-wallets">Wallets <span class="count" id="wallet-count"></span></h2>
+      <div class="panel-tools">
+        <div class="seg" role="tablist" id="wallet-filter">
+          <button role="tab" data-f="all" aria-selected="true">All</button>
+          <button role="tab" data-f="watched">Watched</button>
+          <button role="tab" data-f="parked">Parked</button>
+        </div>
+        <button class="btn btn-sm btn-primary" id="btn-add-wallet" title="Add wallet (N)">+ Add<kbd>N</kbd></button>
+      </div>
     </div>
-    <div id="records"></div>
+    <div class="gate-legend" id="gate-legend"></div>
+    <div class="panel-body scroll" id="wallets"></div>
   </section>
+
+  <div class="col">
+    <section class="panel" id="p-positions" aria-labelledby="h-pos">
+      <div class="panel-head">
+        <h2 id="h-pos">Positions <span class="layer inference">inference</span></h2>
+        <div class="panel-tools">
+          <div class="seg" role="tablist" id="pos-tabs">
+            <button role="tab" data-t="open" aria-selected="true">Open <span class="n" id="n-open">0</span></button>
+            <button role="tab" data-t="closed">Closed <span class="n" id="n-closed">0</span></button>
+          </div>
+        </div>
+      </div>
+      <div class="equity-wrap">
+        <div class="equity-meta"><span class="muted">Equity curve</span><span id="eq-range" class="mono muted"></span></div>
+        <div id="equity-chart" class="equity-chart"></div>
+      </div>
+      <div class="panel-body scroll" id="positions"></div>
+    </section>
+
+    <section class="panel" id="p-flow" aria-labelledby="h-flow">
+      <div class="panel-head">
+        <h2 id="h-flow">Flow</h2>
+        <div class="panel-tools">
+          <div class="seg" role="tablist" id="flow-tabs">
+            <button role="tab" data-t="signals" aria-selected="true">Signals <span class="n" id="n-sig">0</span></button>
+            <button role="tab" data-t="trades">Trades <span class="n" id="n-tr">0</span></button>
+            <button role="tab" data-t="live" id="tab-live">Live txs <span class="n" id="n-live">0</span></button>
+          </div>
+        </div>
+      </div>
+      <div class="panel-body scroll" id="flow"></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel" id="p-quote" aria-labelledby="h-quote">
+      <div class="panel-head">
+        <h2 id="h-quote">Quote lookup <span class="muted sm">Uniswap · read-only</span></h2>
+      </div>
+      <form id="quote-form" class="quote-form" autocomplete="off">
+        <input id="q-token" name="token" class="input mono" placeholder="Paste token 0x… address  (Q)" spellcheck="false" aria-label="token address">
+        <div class="quote-row">
+          <label class="field-inline">Size $<input id="q-size" name="size" class="input input-sm mono" type="number" min="1" step="any" value="500"></label>
+          <div class="quick" id="q-quick">
+            <button type="button" data-t="0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984">UNI</button>
+            <button type="button" data-t="0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32">LDO</button>
+            <button type="button" data-t="0x514910771AF9Ca656af840dff83E8264EcF986CA">LINK</button>
+            <button type="button" data-t="0x6982508145454Ce325dDbE47a25d4ec3d2311933">PEPE</button>
+          </div>
+          <button class="btn btn-sm btn-primary" id="q-go">Quote</button>
+        </div>
+      </form>
+      <div id="quote" class="quote-body"></div>
+    </section>
+
+    <section class="panel grow" id="p-record" aria-labelledby="h-rec">
+      <div class="panel-head">
+        <h2 id="h-rec">the_record <span class="muted sm">append-only</span></h2>
+        <div class="panel-tools">
+          <button class="btn btn-sm btn-icon" id="rec-pause" aria-pressed="false" title="Pause feed">❚❚</button>
+        </div>
+      </div>
+      <div class="rec-filters">
+        <div class="layer-chips" id="layer-chips" role="group" aria-label="layer filter"></div>
+        <div class="rec-row2">
+          <select id="f-kind" class="input input-sm" aria-label="kind filter"><option value="">all kinds</option></select>
+          <input id="f-search" class="input input-sm" placeholder="filter text  (/)" aria-label="search records">
+        </div>
+      </div>
+      <div class="panel-body scroll" id="records"></div>
+    </section>
+  </div>
 </main>
-<script src="/static/app.js"></script>
+
+<footer id="foot">
+  <span>FORM · paper only · nothing here is advice · all P&amp;L simulated</span>
+  <span id="foot-updated" class="mono"></span>
+</footer>
+
+<dialog id="dlg-wallet" class="dialog" aria-labelledby="dw-title">
+  <form id="add-wallet" class="dlg-form" autocomplete="off">
+    <div class="dlg-head">
+      <h3 id="dw-title">Add wallet</h3>
+      <button type="button" class="btn btn-icon btn-sm" data-close aria-label="close">✕</button>
+    </div>
+    <div class="dlg-body two">
+      <div class="fields">
+        <label class="field span2">Address<input name="address" class="input mono" placeholder="0x… (40 hex)" required spellcheck="false"></label>
+        <label class="field">Label<input name="label" class="input" placeholder="e.g. desk-alpha"></label>
+        <label class="field">Independence note<input name="independence_note" class="input" placeholder="funding source / operator"></label>
+        <label class="field">Round trips<input name="round_trips" class="input mono" type="number" step="1" min="0"></label>
+        <label class="field">Win rate (0–1)<input name="win_rate" class="input mono" type="number" step="0.01" min="0" max="1"></label>
+        <label class="field">Median hold (min)<input name="median_hold_min" class="input mono" type="number" step="any" min="0"></label>
+        <label class="field">Buys / day<input name="buys_per_day" class="input mono" type="number" step="any" min="0"></label>
+        <label class="field">Leftover (0–1)<input name="leftover_pct" class="input mono" type="number" step="0.01" min="0" max="1"></label>
+        <label class="field">Top-coin share (0–1)<input name="top_coin_profit_share" class="input mono" type="number" step="0.01" min="0" max="1"></label>
+        <label class="check span2"><input type="checkbox" name="watch" checked> Watch immediately if the gate PASSES (otherwise parked)</label>
+      </div>
+      <div class="preview">
+        <div class="preview-head">Gate preview <span class="muted sm">live · not saved</span></div>
+        <div id="gate-preview"></div>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span class="muted sm">Missing inputs fail closed. Only PASS wallets can be watched.</span>
+      <div>
+        <button type="button" class="btn" data-close>Cancel</button>
+        <button type="submit" class="btn btn-primary" id="dw-submit">Add wallet</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-confirm" class="dialog dialog-sm">
+  <form method="dialog" class="dlg-form">
+    <div class="dlg-head"><h3 id="dc-title">Confirm</h3></div>
+    <div class="dlg-body" id="dc-body"></div>
+    <div class="dlg-foot"><span></span><div>
+      <button value="no" class="btn">Cancel</button>
+      <button value="yes" class="btn btn-danger" id="dc-yes">Confirm</button>
+    </div></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-help" class="dialog dialog-sm">
+  <form method="dialog" class="dlg-form">
+    <div class="dlg-head"><h3>Keyboard</h3><button class="btn btn-icon btn-sm" aria-label="close">✕</button></div>
+    <div class="dlg-body">
+      <table class="keys">
+        <tr><td><kbd>T</kbd></td><td>Run one paper tick</td></tr>
+        <tr><td><kbd>R</kbd></td><td>Run full cycle (tape) / poll+process (live)</td></tr>
+        <tr><td><kbd>P</kbd></td><td>Poll live signals (live mode)</td></tr>
+        <tr><td><kbd>⇧</kbd> <kbd>X</kbd></td><td>Reset paper (confirm)</td></tr>
+        <tr><td><kbd>N</kbd></td><td>Add wallet</td></tr>
+        <tr><td><kbd>Q</kbd></td><td>Focus quote lookup</td></tr>
+        <tr><td><kbd>/</kbd></td><td>Filter the_record</td></tr>
+        <tr><td><kbd>1</kbd>–<kbd>4</kbd></td><td>Toggle record layer fact / inference / hypothesis / unknown</td></tr>
+        <tr><td><kbd>A</kbd></td><td>Toggle auto-refresh</td></tr>
+        <tr><td><kbd>G</kbd></td><td>Refresh now</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Close dialog / blur field</td></tr>
+      </table>
+    </div>
+  </form>
+</dialog>
+
+<div id="toasts" aria-live="polite"></div>
+<div id="tip" role="tooltip"></div>
+<script src="/static/app.js?v=2"></script>
 </body>
 </html>

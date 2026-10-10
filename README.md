@@ -40,6 +40,26 @@ Offline tests use a fake chain (`tests/fakechain.py`, `tests/fakelive.py` for re
 otherwise they are skipped (`LIVE_TEST_WALLET=0x…` picks the wallet for the live scan).
 `python tests/test_smoke.py` still works without pytest.
 
+## Dashboard (operator console)
+![dashboard](docs/dashboard.png)
+
+`http://127.0.0.1:8787/` serves a vanilla HTML/CSS/JS console (`app/static/`, no build step, no JS deps;
+Inter/JetBrains Mono load from Google Fonts with system fallbacks). A red **LIVE OFF · PAPER ONLY** strip is pinned to the top at all times.
+- **Header**: LIVE OFF chip, chain, latest block (RPC probe), data/signal mode, sim clock or live-feed cursor, session id.
+  Actions: **Run tick** `T`, **Run cycle** `R` (whole tape / one live poll+process), **Poll live** `P` (enabled only with
+  `SIGNAL_SOURCE=live`), **Reset paper** `Shift+X` (confirm; the_record kept), auto-refresh toggle `A` (5 s), help `?`.
+- **KPI strip**: equity (+ sparkline), cash/exposure, open PnL, realized PnL, win rate, **fill gap** (avg adverse bps of our
+  simulated fill vs the copied wallet's price), signal outcome counts.
+- **Wallets**: watched/parked with per-gate pips, first failing reason, expandable checks + layered claims; Watch/Unwatch/Remove.
+  **+ Add** `N` opens a form with a live, non-persisted gate preview (`POST /api/gates/preview`).
+- **Positions**: equity curve (current paper run, from `mtm` records) + open/closed tables. **Flow**: processed signals with
+  outcome, paper fills with gap/impact, decoded live txs (live mode).
+- **Quote lookup** `Q`: paste a token address → `/api/quote` (V2 price/liquidity/impact, V3 best pool, floor pass/fail).
+- **the_record**: layer filter chips (`1`–`4`), kind filter, text search `/`, pause, click a row for the raw JSON.
+
+Refresh: the page polls every 5 s (toggle `A`, force `G`); after editing `app/static/*` just reload the browser
+(assets are served straight from disk; bump `?v=` in `index.html` if a browser caches hard).
+
 ## Real mainnet reads (RPC + Uniswap), still paper only
 ### 1. Get a free RPC URL (never commit it)
 - **Alchemy**: sign up at alchemy.com → *Create app* → chain *Ethereum*, network *Mainnet* → copy the
@@ -249,7 +269,8 @@ tests/           test_smoke.py (demo cycle), test_uniswap.py (offline fake chain
 ## API
 `GET /api/health` · `GET /api/config` (RPC redacted) ·
 `GET|POST /api/wallets` · `GET|PATCH|DELETE /api/wallets/{addr}` · `GET /api/wallets/{addr}/gate` ·
-`GET /api/portfolio` · `GET /api/trades` · `GET /api/records?limit=&kind=&layer=` ·
+`GET /api/portfolio` · `GET /api/trades` · `GET /api/stats` (dashboard KPIs + equity series) ·
+`GET /api/signals/recent?limit=` (processed signals + outcome) · `POST /api/gates/preview` (score stats, not saved) · `GET /api/records?limit=&kind=&layer=` ·
 `POST /api/paper/tick` · `POST /api/paper/run` · `POST /api/paper/reset` ·
 `GET /api/quote/{token}?size_usd=&v3=` (live Uniswap price/liquidity/impact) ·
 `GET /api/swaps/{wallet}?blocks=&limit=` (last N Uniswap V2/V3 swaps where wallet is the recipient) ·
